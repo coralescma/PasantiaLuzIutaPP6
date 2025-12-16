@@ -1,0 +1,273 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f4f7f9; /* Fondo muy claro para el contraste */
+    margin: 0;
+    padding: 20px;
+    color: #333;
+}
+
+.report-container {
+    max-width: 900px;
+    margin: 20px auto;
+    background-color: #ffffff;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); /* Sombra suave para un look 3D */
+    padding: 30px;
+    border-radius: 8px; /* Bordes redondeados sutiles */
+}
+
+/* --- Encabezado y Metadatos --- */
+.report-header {
+    text-align: center;
+    padding-bottom: 15px;
+    border-bottom: 3px solid #0056b3; /* Línea de separación azul oscuro */
+    margin-bottom: 25px;
+}
+
+.report-header h1 {
+    color: #0056b3;
+    font-size: 1.8em;
+    margin-top: 0;
+}
+
+.metadata {
+    display: flex;
+    justify-content: space-around;
+    padding: 10px 0;
+    font-size: 0.95em;
+    color: #555;
+}
+
+/* --- Estilo General de Secciones y Tablas --- */
+h2 {
+    border-left: 5px solid #00a0b2; /* Barra lateral para títulos */
+    padding-left: 10px;
+    color: #333;
+    margin-top: 30px;
+    margin-bottom: 15px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 15px 0;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+th, td {
+    border: 1px solid #e0e0e0;
+    padding: 12px 15px;
+    text-align: left;
+    font-size: 0.9em;
+}
+
+th {
+    background-color: #f0f8ff; /* Azul muy claro para encabezados de tabla */
+    color: #333;
+    font-weight: bold;
+}
+
+/* --- ALERTAS Y CÓDIGOS (CRÍTICO) --- */
+.alerta-roja {
+    background-color: #f8d7da; /* Fondo suave para la alerta */
+    font-weight: bold;
+    color: #721c24; /* Rojo oscuro para el texto */
+    border: 2px solid #f5c6cb;
+}
+
+.alerta-verde {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+/* --- Cuadre de Caja Destacado --- */
+.cuadre-caja table td {
+    font-size: 1.1em;
+}
+
+/* --- Cierre Final y Firmas --- */
+.cierre-final {
+    text-align: left;
+    padding-top: 20px;
+    margin-top: 30px;
+    border-top: 1px dashed #ccc; /* Separador sutil */
+}
+
+.recomendacion {
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+    font-weight: bold;
+    line-height: 1.5;
+}
+
+.recomendacion.alerta-roja {
+    border-color: #721c24; /* Borde rojo */
+}
+
+.recomendacion.alerta-verde {
+    border-color: #155724; /* Borde verde */
+}
+
+.firmas {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 60px; /* Más espacio para las firmas */
+}
+
+.firma-box {
+    width: 45%;
+    text-align: center;
+    border-top: 1px solid #333; /* Línea de firma */
+    padding-top: 5px;
+}
+
+.firma-box p {
+    margin-top: 5px;
+    font-size: 0.9em;
+    color: #555;
+}
+
+.back-link {
+    text-align: center;
+    margin-top: 30px;
+}
+
+/* --- Estilos para el Menú de Navegación --- */
+/* --- Estilos para el Menú Fijo --- */
+.main-menu {
+    background-color: #2c3e50; /* Color oscuro profesional */
+    color: white;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: fixed; /* Hace el menú fijo */
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 1000;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.main-menu .logo {
+    font-weight: bold;
+    font-size: 1.2em;
+}
+
+.main-menu ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+}
+
+.main-menu ul li {
+    position: relative;
+    padding: 0 15px;
+}
+
+.main-menu ul li a {
+    color: white;
+    text-decoration: none;
+    padding: 10px 0;
+    display: block;
+    transition: color 0.3s;
+}
+
+.main-menu ul li a:hover {
+    color: #3498db; /* Azul al pasar el ratón */
+}
+
+/* --- Estilos del Dropdown --- */
+.dropdown-content {
+    display: none;
+    position: absolute;
+    background-color: #34495e; /* Un tono más oscuro */
+    min-width: 200px;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+    z-index: 1;
+    border-top: 2px solid #3498db;
+    top: 100%; /* Aparece justo debajo del elemento principal */
+    left: 0;
+}
+
+.dropdown-content a {
+    color: white;
+    padding: 12px 16px;
+    text-decoration: none;
+    display: block;
+    text-align: left;
+}
+
+.dropdown-content a:hover {
+    background-color: #2c3e50;
+}
+
+.dropdown:hover .dropdown-content {
+    display: block; /* Muestra el contenido al pasar el ratón sobre el 'dropdown' */
+}
+
+/* --- Ajuste del Contenido Principal --- */
+/* Esto es CRÍTICO para que el contenido no quede debajo del menú fijo */
+.report-container {
+    /* ... (mantener estilos anteriores) ... */
+    margin-top: 80px; /* Nuevo margen para dejar espacio al menú fijo */
+}
+
+
+/* --- Estilos para Formularios de Gestión --- */
+.form-section {
+    padding: 20px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background-color: #fcfcfc;
+    margin-bottom: 30px;
+}
+
+.data-form label {
+    display: block;
+    margin-top: 10px;
+    font-weight: bold;
+    color: #444;
+}
+
+.data-form input[type="text"],
+.data-form input[type="number"],
+.data-form input[type="date"] {
+    width: calc(100% - 20px);
+    padding: 10px;
+    margin-top: 5px;
+    margin-bottom: 15px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box; /* Incluye padding y borde en el ancho total */
+}
+
+.data-form button[type="submit"] {
+    margin-top: 20px;
+    padding: 12px 25px;
+    border: none;
+    cursor: pointer;
+    font-size: 1em;
+}
+
+.button-a1 {
+    /* Ya definido en estilos base, asegura que el color azul se aplica */
+    background-color: #007bff; 
+}
+
+.current-inventory table {
+    /* Asegurar que las tablas de listados se vean bien */
+    box-shadow: none;
+    border: 1px solid #ddd;
+}
+
+/* Estilo para el botón de eliminar (alerta) */
+.button-delete {
+    background-color: #dc3545; /* Rojo de peligro */
+    padding: 5px 10px;
+    font-size: 0.8em;
+}
+.button-delete:hover {
+    background-color: #c82333;
+}
