@@ -22,9 +22,17 @@ $user_display = $logged_in ?
         <li><a href="<?php echo $base_path; ?>index.php" class="<?php echo ($pagina_activa === 'dashboard' ? 'active' : ''); ?>">Dashboard</a></li>
         
         <li class="dropdown">
-            <a href="#">Gestión de Data</a>
+            <a href="#">Operaciones Diarias</a>
             <div class="dropdown-content">
-                <a href="<?php echo $base_path; ?>gestion/form_transacciones.php">Registro (A.4)</a>
+                <a href="<?php echo $base_path; ?>gestion/form_cierre_caja.php" class="<?php echo ($pagina_activa === 'cierre_caja' ? 'active' : ''); ?>">Cierre de Caja (C.4)</a>
+                <hr>
+                <a href="<?php echo $base_path; ?>gestion/form_transacciones.php">Registro de Venta (A.4)</a>
+            </div>
+        </li>
+
+        <li class="dropdown">
+            <a href="#">Administración</a>
+            <div class="dropdown-content">
                 <a href="<?php echo $base_path; ?>gestion/form_inventario.php">Inventario (D.5)</a>
                 <a href="<?php echo $base_path; ?>gestion/form_parametros.php">Parámetros (D.4)</a>
             </div>
@@ -43,7 +51,7 @@ $user_display = $logged_in ?
                 <?php if ($logged_in): ?>
                     <a href="<?php echo $base_path; ?>logout.php" title="Cerrar la sesión actual">Cerrar Sesión</a>
                 <?php else: ?>
-                    <a href="<?php echo $base_path; ?>login.php" title="Iniciar sesión">Iniciar Sesión</a>
+                    <a href="<?php echo $base_path; ?>login.php" title="Iniciar Sesión">Iniciar Sesión</a>
                 <?php endif; ?>
             </div>
         </li>
