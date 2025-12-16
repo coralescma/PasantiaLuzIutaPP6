@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Servidor: 127.0.0.1
--- Tiempo de generación: 16-12-2025 a las 03:13:05
+-- Tiempo de generación: 16-12-2025 a las 14:12:21
 -- Versión del servidor: 10.4.32-MariaDB
 -- Versión de PHP: 8.0.30
 
@@ -94,6 +94,34 @@ INSERT INTO `control` (`id_control`, `fecha`, `id_cajero_fk`, `monto_registrado_
 -- --------------------------------------------------------
 
 --
+-- Estructura de tabla para la tabla `control_jornadas`
+--
+
+CREATE TABLE `control_jornadas` (
+  `id_jornada` int(11) NOT NULL,
+  `fecha` date NOT NULL,
+  `id_usuario_fk` int(11) NOT NULL,
+  `id_usuario_cierre_fk` int(11) DEFAULT NULL,
+  `monto_apertura` decimal(10,2) NOT NULL,
+  `monto_ventas_sistema` decimal(10,2) DEFAULT 0.00,
+  `monto_conteo_fisico` decimal(10,2) DEFAULT 0.00,
+  `diferencia` decimal(10,2) DEFAULT 0.00,
+  `estado_jornada` int(11) DEFAULT 1,
+  `notas` text DEFAULT NULL,
+  `apertura_timestamp` timestamp NOT NULL DEFAULT current_timestamp(),
+  `cierre_timestamp` datetime DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Volcado de datos para la tabla `control_jornadas`
+--
+
+INSERT INTO `control_jornadas` (`id_jornada`, `fecha`, `id_usuario_fk`, `id_usuario_cierre_fk`, `monto_apertura`, `monto_ventas_sistema`, `monto_conteo_fisico`, `diferencia`, `estado_jornada`, `notas`, `apertura_timestamp`, `cierre_timestamp`) VALUES
+(1, '2025-12-14', 1, NULL, 200.00, 0.00, 0.00, 0.00, 1, 'Jornada de regularización de ventas pasadas', '2025-12-16 08:07:13', NULL);
+
+-- --------------------------------------------------------
+
+--
 -- Estructura de tabla para la tabla `detalle_transaccion`
 --
 
@@ -107,6 +135,17 @@ CREATE TABLE `detalle_transaccion` (
   `motivo` varchar(255) DEFAULT NULL,
   `usuario_autorizador` varchar(100) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Volcado de datos para la tabla `detalle_transaccion`
+--
+
+INSERT INTO `detalle_transaccion` (`id_detalle`, `id_transaccion_fk`, `id_producto_fk`, `cantidad`, `precio_venta`, `es_egreso_especial`, `motivo`, `usuario_autorizador`) VALUES
+(1, 1, 1, 1, 8.50, 0, NULL, NULL),
+(2, 2, 3, 1, 5.00, 0, NULL, NULL),
+(3, 2, 2, 1, 1.25, 0, NULL, NULL),
+(4, 2, 1, 1, 8.50, 0, NULL, NULL),
+(5, 3, 1, 1, 8.50, 0, NULL, NULL);
 
 -- --------------------------------------------------------
 
@@ -151,9 +190,9 @@ CREATE TABLE `inventario` (
 --
 
 INSERT INTO `inventario` (`id_producto`, `nombre_producto`, `stock_actual`, `costo_unitario`, `ultima_venta_fecha`, `proveedor`, `fecha_registro`) VALUES
-(1, 'Café Molido Gourmet 250g', 150, 8.50, NULL, NULL, '2025-12-16 01:21:17'),
-(2, 'Tostada Integral', 300, 1.25, NULL, NULL, '2025-12-16 01:21:17'),
-(3, 'Jugo Natural de Naranja (Litro)', 50, 5.00, NULL, NULL, '2025-12-16 01:21:17');
+(1, 'Café Molido Gourmet 250g', 147, 8.50, '2025-12-16', NULL, '2025-12-16 01:21:17'),
+(2, 'Tostada Integral', 299, 1.25, '2025-12-16', NULL, '2025-12-16 01:21:17'),
+(3, 'Jugo Natural de Naranja (Litro)', 49, 5.00, '2025-12-16', NULL, '2025-12-16 01:21:17');
 
 -- --------------------------------------------------------
 
@@ -236,6 +275,15 @@ CREATE TABLE `transacciones` (
   `fecha_registro` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+--
+-- Volcado de datos para la tabla `transacciones`
+--
+
+INSERT INTO `transacciones` (`id_transaccion`, `fecha_venta`, `monto_venta`, `tipo_cobro`, `es_egreso`, `usuario_registro`, `referencia_banco`, `fecha_registro`) VALUES
+(1, '2025-12-16', 8.50, 'TPV', 0, 'admin', '131', '2025-12-16 02:18:46'),
+(2, '2025-12-16', 14.75, 'Pago_Movil', 0, 'admin', '32453', '2025-12-16 02:19:17'),
+(3, '2025-12-16', 8.50, 'Pago_Movil', 0, 'admin', '5232', '2025-12-16 08:33:45');
+
 -- --------------------------------------------------------
 
 --
@@ -309,6 +357,14 @@ ALTER TABLE `control`
   ADD PRIMARY KEY (`id_control`),
   ADD UNIQUE KEY `fecha` (`fecha`),
   ADD KEY `id_cajero_fk` (`id_cajero_fk`);
+
+--
+-- Indices de la tabla `control_jornadas`
+--
+ALTER TABLE `control_jornadas`
+  ADD PRIMARY KEY (`id_jornada`),
+  ADD KEY `id_usuario_fk` (`id_usuario_fk`),
+  ADD KEY `fk_usuario_cierre` (`id_usuario_cierre_fk`);
 
 --
 -- Indices de la tabla `detalle_transaccion`
@@ -394,10 +450,16 @@ ALTER TABLE `control`
   MODIFY `id_control` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
+-- AUTO_INCREMENT de la tabla `control_jornadas`
+--
+ALTER TABLE `control_jornadas`
+  MODIFY `id_jornada` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+
+--
 -- AUTO_INCREMENT de la tabla `detalle_transaccion`
 --
 ALTER TABLE `detalle_transaccion`
-  MODIFY `id_detalle` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_detalle` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
 
 --
 -- AUTO_INCREMENT de la tabla `historial_tasa_de_cambio`
@@ -427,7 +489,7 @@ ALTER TABLE `tipo_movimiento`
 -- AUTO_INCREMENT de la tabla `transacciones`
 --
 ALTER TABLE `transacciones`
-  MODIFY `id_transaccion` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id_transaccion` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
 
 --
 -- AUTO_INCREMENT de la tabla `usuario`
@@ -462,6 +524,13 @@ ALTER TABLE `conciliacion_final`
 --
 ALTER TABLE `control`
   ADD CONSTRAINT `control_ibfk_1` FOREIGN KEY (`id_cajero_fk`) REFERENCES `usuario` (`id_usuario`);
+
+--
+-- Filtros para la tabla `control_jornadas`
+--
+ALTER TABLE `control_jornadas`
+  ADD CONSTRAINT `control_jornadas_ibfk_1` FOREIGN KEY (`id_usuario_fk`) REFERENCES `usuarios` (`id_usuario`),
+  ADD CONSTRAINT `fk_usuario_cierre` FOREIGN KEY (`id_usuario_cierre_fk`) REFERENCES `usuarios` (`id_usuario`);
 
 --
 -- Filtros para la tabla `detalle_transaccion`

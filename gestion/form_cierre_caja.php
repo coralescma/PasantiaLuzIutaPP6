@@ -8,15 +8,24 @@ include '../includes/db_connect.php';
 
 $mensaje_estado = "";
 
-// 1. Obtener parámetros y fondos
-$sql_params = "SELECT umbral_tolerancia_efectivo, efectivo_requiere_conteo_inicial, fondo_caja_inicial FROM parametros_negocio WHERE id_parametro = 1";
-$params_result = $conn->query($sql_params);
-$params = $params_result->fetch_assoc();
-$fondo_caja_inicial = $params['fondo_caja_inicial'] ?? 200.00;
-$requiere_conteo_inicial = $params['efectivo_requiere_conteo_inicial'] ?? 1;
 
-// 2. Obtener lista de supervisores para el campo de selección
-$sql_supervisores = "SELECT id_usuario, user_full_name FROM usuarios WHERE role = 'Supervisor' OR role = 'Admin'";
+// --- 1. Obtener parámetros (Configuración) ---
+$sql_params = "SELECT umbral_tolerancia_efectivo, fondo_caja_inicial FROM parametros_negocio LIMIT 1";
+$params_result = $conn->query($sql_params);
+
+// Verificación robusta para evitar el Fatal Error
+if ($params_result && $params_result->num_rows > 0) {
+    $params = $params_result->fetch_assoc();
+    $umbral_tolerancia = $params['umbral_tolerancia_efectivo'] ?? 5.00;
+    $fondo_caja_inicial = $params['fondo_caja_inicial'] ?? 200.00;
+} else {
+    // Valores de rescate si la tabla parámetros está vacía o falla
+    $umbral_tolerancia = 5.00;
+    $fondo_caja_inicial = 200.00;
+}
+
+// --- 2. Obtener lista de supervisores para el Select ---
+$sql_supervisores = "SELECT id_usuario, user_full_name FROM usuarios WHERE role IN ('Supervisor', 'Admin')";
 $resultado_supervisores = $conn->query($sql_supervisores);
 
 // 3. Obtener el total de efectivo registrado para el día (solo lectura/validación)
