@@ -35,7 +35,9 @@ $pagina_activa = $pagina_activa ?? '';
             <div class="dropdown-content">
                 <a href="<?php echo $base_path; ?>gestion/gestion_usuarios.php">👤 Usuarios y Privilegios</a>
                 <a href="<?php echo $base_path; ?>gestion/form_parametros.php">⚙️ Parámetros (D.4)</a>
+                <a href="<?php echo $base_path; ?>gestion/admin_metodos_pago.php">💳 Métodos de pago</a>
                 <a href="<?php echo $base_path; ?>gestion/gestion_movimientos.php">🔄 Tipos de Movimiento</a>
+                
                 <hr>
                 <a href="<?php echo $base_path; ?>gestion/form_inventario.php">📦 Inventario (D.5)</a>
             </div>

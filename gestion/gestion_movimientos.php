@@ -12,7 +12,8 @@ $mensaje = "";
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $id_modificar = isset($_POST['id_tipo_movimiento']) ? intval($_POST['id_tipo_movimiento']) : 0;
     $nombre = $_POST['nombre_movimiento'];
-    $flujo = $_POST['tipo_flujo'];
+    // Ajustamos para que coincida con ENUM('Entrada', 'Salida') de pmv.sql
+    $flujo = $_POST['tipo_flujo']; 
 
     if ($id_modificar > 0) {
         // ACTUALIZAR EXISTENTE
@@ -57,7 +58,7 @@ $res = $conn->query($sql_list);
 <body>
     <?php include '../includes/menu.php'; ?>
 
-    <div class="report-container">
+    <div class="report-container" style="padding: 20px;">
         <h1>🔄 Configuración de Movimientos</h1>
         <?php echo $mensaje; ?>
 
@@ -74,12 +75,12 @@ $res = $conn->query($sql_list);
                     
                     <label>Tipo de Flujo</label>
                     <select name="tipo_flujo" id="tipo_flujo" class="input-box">
-                        <option value="Ingreso">🟢 INGRESO</option>
-                        <option value="Egreso">🔴 EGRESO</option>
+                        <option value="Entrada">🟢 ENTRADA (Ingreso)</option>
+                        <option value="Salida">🔴 SALIDA (Egreso)</option>
                     </select>
                     
-                    <button type="submit" class="boton-primario" id="btn-submit" style="width:100%; padding:12px;">💾 Guardar Categoría</button>
-                    <button type="button" onclick="cancelarEdicion()" id="btn-cancel" style="width:100%; margin-top:10px; display:none;">Cancelar</button>
+                    <button type="submit" class="boton-primario" id="btn-submit" style="width:100%; padding:12px; background: #2563eb; color:white; border:none; border-radius:4px; cursor:pointer;">💾 Guardar Categoría</button>
+                    <button type="button" onclick="cancelarEdicion()" id="btn-cancel" style="width:100%; margin-top:10px; display:none; padding:10px;">Cancelar</button>
                 </form>
             </div>
 
@@ -97,7 +98,11 @@ $res = $conn->query($sql_list);
                         <?php while($row = $res->fetch_assoc()): ?>
                         <tr>
                             <td><strong><?php echo htmlspecialchars($row['nombre_movimiento']); ?></strong></td>
-                            <td><?php echo strtoupper($row['tipo_flujo']); ?></td>
+                            <td>
+                                <span style="color: <?php echo ($row['tipo_flujo'] == 'Entrada') ? '#10b981' : '#e11d48'; ?>; font-weight:bold;">
+                                    <?php echo strtoupper($row['tipo_flujo']); ?>
+                                </span>
+                            </td>
                             <td>
                                 <span class="btn-edit" onclick="editarMovimiento(
                                     '<?php echo $row['id_tipo_movimiento']; ?>', 
@@ -115,18 +120,15 @@ $res = $conn->query($sql_list);
 
     <script>
         function editarMovimiento(id, nombre, flujo) {
-            // Cambiar textos del formulario
             document.getElementById('form-title').innerText = 'Editar Categoría';
             document.getElementById('edit-mode').style.display = 'block';
             document.getElementById('btn-submit').innerText = '🚀 Actualizar Categoría';
             document.getElementById('btn-cancel').style.display = 'block';
             
-            // Llenar campos
             document.getElementById('id_tipo_movimiento').value = id;
             document.getElementById('nombre_movimiento').value = nombre;
             document.getElementById('tipo_flujo').value = flujo;
             
-            // Hacer scroll suave al formulario
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
