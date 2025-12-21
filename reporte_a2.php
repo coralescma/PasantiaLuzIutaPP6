@@ -1,16 +1,17 @@
 <?php
-// reporte_a2.php - PANEL DE AUDITORÍA Y VALIDACIÓN BANCARIA
+// reporte_a2.php - PANEL DE AUDITORÍA Y VALIDACIÓN BANCARIA (V.4.5)
 include 'includes/auth.php'; 
 require_login(['Administrador', 'Contador']); 
 include 'includes/db_connect.php'; 
 
 $pagina_activa = 'reporte_a2'; 
 
-// --- 1. LÓGICA DE ACTUALIZACIÓN (VALIDACIÓN) ---
+// --- 1. LÓGICA DEL INTERRUPTOR (0 o 1) ---
 if (isset($_POST['toggle_conciliacion'])) {
-    $id_pago = intval($_POST['id_pago']);
-    $nuevo_estado = intval($_POST['nuevo_estado']);
-    $sql_update = "UPDATE detalle_pago SET conciliado_banco = $nuevo_estado WHERE id_pago = $id_pago";
+    $id_pago_val = intval($_POST['id_pago']);
+    $nuevo_estado = intval($_POST['nuevo_estado']); 
+    
+    $sql_update = "UPDATE detalle_pago SET conciliado_banco = $nuevo_estado WHERE id_pago = $id_pago_val";
     $conn->query($sql_update);
 }
 
@@ -24,98 +25,122 @@ $id_jornada_consulta = isset($_GET['id_jornada']) ? intval($_GET['id_jornada']) 
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Auditoría A2 - Validación Bancaria</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>Auditoría Bancaria - A2</title>
+    <link rel="stylesheet" href="assets/css/estilos.css">
     <style>
-        .audit-container { max-width: 1000px; margin: 20px auto; padding: 20px; font-family: sans-serif; }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .btn-validar { padding: 8px 15px; cursor: pointer; border-radius: 4px; border: none; font-weight: bold; }
-        .btn-pendiente { background: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
-        .btn-conciliado { background: #dcfce7; color: #166534; border: 1px solid #4ade80; }
+        :root { --primary: #2563eb; --success: #10b981; --danger: #ef4444; --slate: #64748b; }
+        body { background: #f1f5f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; }
+        .container { padding: 30px; max-width: 1100px; margin: auto; }
+        .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .header { margin-bottom: 25px; border-left: 5px solid var(--primary); padding-left: 20px; }
+        
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th { background: #f1f5f9; padding: 12px; text-align: left; border-bottom: 2px solid #e2e8f0; }
-        td { padding: 12px; border-bottom: 1px solid #eee; }
-        .status-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        th { background: #f8fafc; color: var(--slate); text-align: left; padding: 15px; border-bottom: 2px solid #e2e8f0; font-size: 0.9em; }
+        td { padding: 15px; border-bottom: 1px solid #e2e8f0; color: #1e293b; }
+        
+        .badge { padding: 6px 12px; border-radius: 50px; font-size: 0.75em; font-weight: bold; display: inline-block; }
+        .badge-pendiente { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+        .badge-ok { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+        
+        .btn-toggle { border: none; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85em; transition: 0.2s; }
+        .btn-check { background: var(--success); color: white; }
+        .btn-undo { background: var(--slate); color: white; }
+        .btn-toggle:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        
+        .selector-box { margin-bottom: 25px; display: flex; align-items: center; gap: 15px; background: #fff; padding: 15px; border-radius: 10px; }
+        select { padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; min-width: 250px; font-size: 1em; }
     </style>
 </head>
 <body>
-    <?php include 'includes/menu.php'; ?>
 
-    <div class="audit-container">
-        <div class="status-header">
-            <h1>🔍 Auditoría A.2: Validación de Bancos</h1>
-            <form method="GET">
-                <select name="id_jornada" onchange="this.form.submit()" style="padding: 10px; border-radius: 5px;">
-                    <option value="">-- Seleccionar Jornada --</option>
+    <div class="container">
+        <div class="header">
+            <h1 style="margin:0; color: #1e293b;">Reporte A.2: Auditoría de Pagos</h1>
+            <p style="margin:5px 0 0; color: var(--slate);">Validación de transferencias y tarjetas (Interruptor de Banco)</p>
+        </div>
+
+        <div class="selector-box card">
+            <strong>Seleccionar Jornada:</strong>
+            <form method="GET" action="">
+                <select name="id_jornada" onchange="this.form.submit()">
+                    <option value="">--- Seleccione una Jornada ---</option>
                     <?php while($j = $lista_jornadas->fetch_assoc()): ?>
                         <option value="<?php echo $j['id_jornada']; ?>" <?php echo ($id_jornada_consulta == $j['id_jornada']) ? 'selected' : ''; ?>>
-                            Jornada #<?php echo $j['id_jornada']; ?> (<?php echo $j['fecha_apertura']; ?>)
+                            Jornada #<?php echo $j['id_jornada']; ?> (<?php echo date('d/m/Y', strtotime($j['fecha_apertura'])); ?>)
                         </option>
                     <?php endwhile; ?>
                 </select>
             </form>
         </div>
 
-        <?php if ($id_jornada_consulta): 
-            // CONSULTA SEGURA: Verificamos si la tabla tiene los campos necesarios
-            $sql_det = "SELECT dp.id_pago, t.id_registro, t.fecha_hora, mp.nombre_metodo, 
-                               dp.monto_pago, dp.conciliado_banco, t.referencia_banco
-                        FROM detalle_pago dp
-                        JOIN transacciones t ON dp.id_transaccion_fk = t.id_registro
-                        JOIN metodos_pago mp ON dp.id_metodo_fk = mp.id_metodo
-                        WHERE t.id_jornada_fk = $id_jornada_consulta 
-                        AND mp.nombre_metodo != 'Efectivo'
-                        ORDER BY t.fecha_hora ASC";
-            
-            $res_det = $conn->query($sql_det);
-            
-            if ($res_det): ?>
+        <?php if ($id_jornada_consulta > 0): ?>
             <div class="card">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Ticket</th>
-                            <th>Método</th>
-                            <th>Ref. Banco</th>
-                            <th>Monto</th>
-                            <th>Estado de Acreditación</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if ($res_det->num_rows > 0): ?>
-                            <?php while($row = $res_det->fetch_assoc()): ?>
+                <?php
+                // CONSULTA AJUSTADA A pmv (5).sql
+                // Filtramos métodos 2 (Tarjeta) y 3 (Transferencia)
+                $sql_auditoria = "SELECT dp.id_pago, dp.monto_pago, dp.conciliado_banco, 
+                                         mp.nombre_metodo, t.fecha_transaccion, t.id_registro as ref_venta
+                                  FROM detalle_pago dp
+                                  JOIN metodos_pago mp ON dp.id_metodo_fk = mp.id_metodo
+                                  JOIN transacciones t ON dp.id_transaccion_fk = t.id_registro
+                                  WHERE t.id_jornada_fk = $id_jornada_consulta 
+                                  AND mp.id_metodo IN (2, 3) 
+                                  ORDER BY t.id_registro DESC";
+                
+                $res_auditoria = $conn->query($sql_auditoria);
+
+                if ($res_auditoria && $res_auditoria->num_rows > 0): ?>
+                    <table>
+                        <thead>
                             <tr>
-                                <td>#<?php echo $row['id_registro']; ?></td>
-                                <td><strong><?php echo $row['nombre_metodo']; ?></strong></td>
-                                <td><code><?php echo $row['referencia_banco'] ?: '---'; ?></code></td>
-                                <td>$<?php echo number_format($row['monto_pago'], 2); ?></td>
-                                <td>
-                                    <form method="POST">
-                                        <input type="hidden" name="id_pago" value="<?php echo $row['id_pago']; ?>">
-                                        <input type="hidden" name="nuevo_estado" value="<?php echo $row['conciliado_banco'] ? 0 : 1; ?>">
-                                        <button type="submit" name="toggle_conciliacion" 
-                                                class="btn-validar <?php echo $row['conciliado_banco'] ? 'btn-conciliado' : 'btn-pendiente'; ?>">
-                                            <?php echo $row['conciliado_banco'] ? '✔ Acreditado' : '⌛ Pendiente'; ?>
-                                        </button>
-                                    </form>
-                                </td>
+                                <th>ID Venta</th>
+                                <th>Fecha Transacción</th>
+                                <th>Método de Pago</th>
+                                <th>Monto</th>
+                                <th>Estado Auditoría</th>
+                                <th>Acción</th>
                             </tr>
+                        </thead>
+                        <tbody>
+                            <?php while($row = $res_auditoria->fetch_assoc()): ?>
+                                <tr>
+                                    <td><strong>#<?php echo $row['ref_venta']; ?></strong></td>
+                                    <td><?php echo date('H:i:s', strtotime($row['fecha_transaccion'])); ?></td>
+                                    <td><span style="color:var(--primary); font-weight:bold;"><?php echo $row['nombre_metodo']; ?></span></td>
+                                    <td><strong>$<?php echo number_format($row['monto_pago'], 2); ?></strong></td>
+                                    <td>
+                                        <?php if($row['conciliado_banco'] == 1): ?>
+                                            <span class="badge badge-ok">✓ CONCILIADO EN BANCO</span>
+                                        <?php else: ?>
+                                            <span class="badge badge-pendiente">● PENDIENTE DE REVISIÓN</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <form method="POST" style="margin:0;">
+                                            <input type="hidden" name="id_pago" value="<?php echo $row['id_pago']; ?>">
+                                            <?php if($row['conciliado_banco'] == 0): ?>
+                                                <input type="hidden" name="nuevo_estado" value="1">
+                                                <button type="submit" name="toggle_conciliacion" class="btn-toggle btn-check">Confirmar Banco</button>
+                                            <?php else: ?>
+                                                <input type="hidden" name="nuevo_estado" value="0">
+                                                <button type="submit" name="toggle_conciliacion" class="btn-toggle btn-undo">Deshacer</button>
+                                            <?php endif; ?>
+                                        </form>
+                                    </td>
+                                </tr>
                             <?php endwhile; ?>
-                        <?php else: ?>
-                            <tr><td colspan="5" style="text-align:center;">No hay transacciones electrónicas en esta jornada.</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
+                        </tbody>
+                    </table>
+                <?php else: ?>
+                    <div style="text-align:center; padding: 50px; color: var(--slate);">
+                        <img src="https://cdn-icons-png.flaticon.com/512/2748/2748614.png" width="60" style="opacity: 0.2; margin-bottom: 15px;"><br>
+                        No se encontraron pagos con Tarjeta o Transferencia en esta jornada.
+                    </div>
+                <?php endif; ?>
             </div>
-            <?php else: ?>
-                <div style="color:red; background:#fee2e2; padding:15px; border-radius:8px;">
-                    <strong>Error de base de datos:</strong> <?php echo $conn->error; ?>. 
-                    <br>Asegúrate de haber ejecutado los comandos SQL de actualización.
-                </div>
-            <?php endif; ?>
         <?php else: ?>
-            <div style="text-align:center; padding:40px; color:#64748b;">
-                <h3>Por favor, selecciona una jornada para auditar los pagos bancarios.</h3>
+            <div style="text-align:center; padding: 100px; color: var(--slate);">
+                <h3 style="font-weight: 400;">Seleccione una jornada arriba para auditar los pagos electrónicos.</h3>
             </div>
         <?php endif; ?>
     </div>
