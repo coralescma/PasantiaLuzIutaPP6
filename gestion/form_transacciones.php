@@ -1,363 +1,197 @@
 <?php
-// gestion/form_transacciones.php - Versión 4.0 (Solo Ventas)
-
-// ===============================================
-// Bloque PHP 1: SEGURIDAD, CONEXIÓN y LÓGICA
-// ===============================================
+// gestion/form_transacciones.php - Punto de Venta Sincronizado
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
 
 include '../includes/auth.php'; 
-require_login(['Administrador', 'Supervisor', 'Cajero']); 
+require_login(); // Permite acceso según sesión activa
 include '../includes/db_connect.php'; 
 
 $mensaje = "";
 $clase_mensaje = "";
-$pagina_activa = 'gestion'; 
 
-// --- 3. Obtener listado de Productos ---
-$sql_productos = "SELECT id_producto, nombre_producto, costo_unitario FROM inventario ORDER BY nombre_producto";
-$resultado_productos = $conn->query($sql_productos);
-$productos_raw = [];
-$productos_options_html = '<option value="">-- Seleccione Producto --</option>'; 
+// 1. VERIFICAR JORNADA ACTIVA (Requisito para vender)
+$id_jornada = obtenerJornadaActiva($conn);
 
-while ($row = $resultado_productos->fetch_assoc()) {
-    // Usamos el costo_unitario como precio_venta por defecto
-    $row['precio_venta_defecto'] = (float)$row['costo_unitario'];
-    $productos_raw[] = $row;
-    
-    // Generamos las opciones del select en PHP
-    $productos_options_html .= '<option value="' . $row['id_producto'] . '">' . 
-                                $row['nombre_producto'] . ' ($' . number_format($row['precio_venta_defecto'], 2) . ')' . 
-                                '</option>';
-}
-$productos_json = json_encode($productos_raw);
-
-
-// --- 4. Lógica de Procesamiento de Transacción (POST) ---
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    
-    // --- A. Recolección de Datos Principales ---
-    $tipo_cobro = $conn->real_escape_string($_POST['tipo_cobro']);
-    // Requerimiento 2: Usar la fecha del sistema (no modificable)
-    $fecha_venta = date('Y-m-d'); 
-    $es_egreso_global = 0; // Siempre 0, ya no gestionamos egresos aquí.
-    $monto_venta = (float)$_POST['monto_total_oculto']; 
-    $referencia_banco = $conn->real_escape_string($_POST['referencia_banco'] ?? null); 
-    $usuario_registro = $_SESSION['username'] ?? 'Sistema'; 
-    
-    // --- B. Validación y Reconstrucción de Detalles desde el JSON del Frontend ---
-    $detalles_json = json_decode($_POST['detalles_json'] ?? '[]', true);
-
-    if (empty($detalles_json)) {
-        $mensaje = "Error: Debe ingresar al menos un producto válido.";
-        $clase_mensaje = "alerta-roja";
-    } elseif ($tipo_cobro != 'N/A' && ($tipo_cobro == 'TPV' || $tipo_cobro == 'Pago_Movil') && empty($referencia_banco)) {
-        $mensaje = "Error: Debe registrar el número de referencia bancaria.";
+// 2. PROCESAR VENTA (POST)
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['btn_guardar_venta'])) {
+    if (!$id_jornada) {
+        $mensaje = "❌ No se puede vender: No hay una jornada abierta.";
         $clase_mensaje = "alerta-roja";
     } else {
-        
-        // --- C. Inserción de Transacción Principal ---
-        $sql_transaccion = "INSERT INTO transacciones (fecha_venta, monto_venta, tipo_cobro, es_egreso, usuario_registro, referencia_banco) 
-                            VALUES ('$fecha_venta', $monto_venta, '$tipo_cobro', $es_egreso_global, '$usuario_registro', " . 
-                            ($referencia_banco ? "'$referencia_banco'" : "NULL") . ")";
-        
-        if ($conn->query($sql_transaccion) === TRUE) {
-            $id_transaccion = $conn->insert_id;
-            $exito_detalles = true;
+        $id_usuario_cajero = $_SESSION['user_id'];
+        $monto_total = floatval($_POST['monto_total_oculto']);
+        $metodo_pago = $conn->real_escape_string($_POST['metodo_pago']);
+        $referencia = $conn->real_escape_string($_POST['referencia_banco'] ?? '');
+
+        // INSERTAR CABECERA DE TRANSACCIÓN
+        $sql_trans = "INSERT INTO transacciones (id_jornada_fk, id_usuario_cajero_fk, fecha_transaccion, monto_total, metodo_pago, tipo_transaccion, referencia_bancaria) 
+                      VALUES ($id_jornada, $id_usuario_cajero, NOW(), $monto_total, '$metodo_pago', 'Venta', '$referencia')";
+
+        if ($conn->query($sql_trans)) {
+            $id_venta = $conn->insert_id;
             
-            // --- D. Inserción de Detalles y Actualización de Inventario ---
-            foreach ($detalles_json as $detalle) {
-                $id_producto = (int)$detalle['id_producto'];
-                $cantidad = (int)$detalle['cantidad'];
-                $precio_venta_registrado = (float)$detalle['precio_venta']; 
-                // Los campos de egreso especial y motivo ya no existen en este formulario.
+            // PROCESAR DETALLES (JSON enviado desde el JS)
+            $detalles = json_decode($_POST['detalles_json'], true);
+            foreach ($detalles as $item) {
+                $id_p = intval($item['id_producto']);
+                $cant = intval($item['cantidad']);
+                $precio = floatval($item['precio_venta']);
+
+                // Insertar detalle
+                $conn->query("INSERT INTO detalle_transacciones (id_transaccion_fk, id_producto_fk, cantidad, precio_unitario) 
+                              VALUES ($id_venta, $id_p, $cant, $precio)");
                 
-                // 1. Inserción del Detalle
-                // Quitamos 'motivo' y 'es_egreso_especial' del INSERT
-                $sql_detalle = "INSERT INTO detalle_transaccion (id_transaccion_fk, id_producto_fk, cantidad, precio_venta)
-                                VALUES ($id_transaccion, {$id_producto}, {$cantidad}, {$precio_venta_registrado})";
-                                
-                if ($conn->query($sql_detalle) === FALSE) {
-                    $exito_detalles = false;
-                    break;
-                }
-                
-                // 2. Actualización de Inventario (stock disminuye por venta)
-                $sql_update_stock = "UPDATE inventario SET stock_actual = stock_actual - $cantidad WHERE id_producto = $id_producto";
-                $conn->query($sql_update_stock);
-                
-                // 3. Actualizar la última venta
-                $sql_update_fecha = "UPDATE inventario SET ultima_venta_fecha = '$fecha_venta' WHERE id_producto = $id_producto";
-                $conn->query($sql_update_fecha);
+                // Descontar Inventario
+                $conn->query("UPDATE inventario SET stock_actual = stock_actual - $cant WHERE id_producto = $id_p");
             }
-            
-            if ($exito_detalles) {
-                $mensaje = "✅ VENTA (A.4) con ID #{$id_transaccion} registrada por **{$usuario_registro}**. Total: $". number_format($monto_venta, 2);
-                $clase_mensaje = "alerta-verde";
-                
-            } else {
-                $mensaje = "Error al guardar el detalle. Por favor, revise manualmente la DB.";
-                $clase_mensaje = "alerta-roja";
-            }
-            
+
+            $mensaje = "✅ Venta #$id_venta registrada y stock actualizado.";
+            $clase_mensaje = "alerta-verde";
         } else {
-            $mensaje = "Error al crear la Transacción Principal: " . $conn->error;
+            $mensaje = "❌ Error en SQL: " . $conn->error;
             $clase_mensaje = "alerta-roja";
         }
     }
 }
+
+// 3. OBTENER PRODUCTOS PARA EL SELECT
+$res_prod = $conn->query("SELECT id_producto, nombre_producto, costo_unitario, stock_actual FROM inventario WHERE stock_actual > 0");
+$productos_json = [];
+while($p = $res_prod->fetch_assoc()) { $productos_json[] = $p; }
 ?>
 
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Registro A.4 - Transacciones de Venta</title>
+    <title>SCL - Registro de Ventas</title>
     <link rel="stylesheet" href="../css/style.css">
     <style>
-        /* Requerimiento 3: Aumentar visibilidad del input de cantidad */
-        .qty-input {
-            width: 80px !important; 
-            text-align: center;
-        }
+        .venta-container { max-width: 900px; margin: 20px auto; display: grid; grid-template-columns: 1fr 300px; gap: 20px; }
+        .panel-izq, .panel-der { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f1f5f9; text-align: left; padding: 10px; }
+        input, select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; }
+        .total-box { font-size: 2em; font-weight: bold; color: #2563eb; text-align: right; margin-top: 10px; }
     </style>
 </head>
 <body>
     <?php include '../includes/menu.php'; ?>
-    <div class="report-container">
-        <header class="report-header">
-            <h1>✍️ REGISTRO A.4: Transacciones de Venta (Solo Ingreso)</h1>
-            <p><strong>Cajero:</strong> <?php echo $_SESSION['user_full_name'] ?? 'N/A'; ?> | Fecha: <?php echo date('Y-m-d'); ?></p>
-        </header>
 
-        <?php if (!empty($mensaje)): ?>
-            <div class="recomendacion <?php echo $clase_mensaje; ?>"><?php echo $mensaje; ?></div>
+    <div style="padding: 20px; max-width: 1200px; margin: 0 auto;">
+        <h1>🛒 Punto de Venta (A.4)</h1>
+        
+        <?php if ($mensaje): ?>
+            <div class="<?php echo $clase_mensaje; ?>" style="padding:15px; margin-bottom:20px; border-radius:5px;"><?php echo $mensaje; ?></div>
         <?php endif; ?>
 
-        <section class="form-section">
-            <form id="transaccion_form" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post" class="data-form">
-                
-                <h2>Configuración de Venta</h2>
-                <div class="form-group-inline">
-                    <label for="fecha_venta">Fecha de Transacción (Sistema):</label>
-                    <input type="date" id="fecha_venta" name="fecha_venta" value="<?php echo date('Y-m-d'); ?>" readonly> 
-                    
-                    <label for="tipo_cobro">Medio de Cobro:</label>
-                    <select id="tipo_cobro" name="tipo_cobro" required>
-                        <option value="TPV">Tarjeta TPV</option>
-                        <option value="Pago_Movil">Pago Móvil</option>
-                    </select>
-                </div>
+        <?php if (!$id_jornada): ?>
+            <div class="alerta-roja">⛔ BLOQUEADO: Debe <a href="form_jornada.php">abrir una jornada</a> para poder vender.</div>
+        <?php else: ?>
 
-                <div id="referencia_section">
-                    <label for="referencia_banco">Número de Referencia/Lote Bancario:</label>
-                    <input type="text" id="referencia_banco" name="referencia_banco" placeholder="Escriba la referencia aquí" required>
-                </div>
-                
-                <hr>
-
-                <h2>Detalle de Productos</h2>
-                
-                <table id="detalle_table" class="data-table">
+        <form id="formVenta" method="POST" class="venta-container">
+            <div class="panel-izq">
+                <h3>Productos en Carrito</h3>
+                <table id="tablaProductos">
                     <thead>
                         <tr>
                             <th>Producto</th>
-                            <th style="width: 100px;">Cant.</th>
-                            <th style="width: 120px;">Precio Unitario ($)</th>
-                            <th style="width: 100px;">Subtotal ($)</th>
-                            <th style="width: 50px;"></th>
+                            <th width="100">Cant.</th>
+                            <th width="120">Precio</th>
+                            <th width="100">Subtotal</th>
                         </tr>
                     </thead>
-                    <tbody id="detalle_body">
+                    <tbody id="cuerpoTabla">
                         </tbody>
-                    <tfoot>
-                        <tr>
-                            <td colspan="3" id="colspan_total" style="text-align: right; font-weight: bold;">TOTAL VENTA:</td>
-                            <td><span id="total_display">$0.00</span></td>
-                            <td></td>
-                        </tr>
-                    </tfoot>
                 </table>
+                <button type="button" onclick="agregarFila()" style="margin-top:15px; background:#64748b; color:white; border:none; padding:8px 15px; border-radius:4px; cursor:pointer;">+ Agregar Producto (F8)</button>
+            </div>
 
-                <input type="hidden" name="monto_total_oculto" id="monto_total_oculto" value="0.00">
+            <div class="panel-der">
+                <h3>Finalizar Pago</h3>
+                <label>Método de Pago:</label>
+                <select name="metodo_pago" required style="width:100%; margin-bottom:15px;">
+                    <option value="Efectivo">💵 Efectivo</option>
+                    <option value="Pago Movil">📱 Pago Móvil</option>
+                    <option value="TPV">💳 Punto de Venta (Tarjeta)</option>
+                </select>
+
+                <label>Ref. Bancaria (Si aplica):</label>
+                <input type="text" name="referencia_banco" style="width:100%; margin-bottom:15px;" placeholder="Últimos 4 dígitos">
+
+                <div class="total-box">$ <span id="totalTxt">0.00</span></div>
+                
+                <input type="hidden" name="monto_total_oculto" id="monto_total_oculto">
                 <input type="hidden" name="detalles_json" id="detalles_json">
                 
-                <button type="button" onclick="addDetalleRow()" class="button button-a2" style="margin-top: 10px;">+ Añadir Producto (F8)</button>
-
-                <div style="margin-top: 30px;">
-                    <button type="submit" class="button button-a1">Registrar Venta (Enter)</button>
-                </div>
-            </form>
-        </section>
-
+                <button type="submit" name="btn_guardar_venta" class="btn-login" style="width:100%; margin-top:20px; background:#10b981;">✅ REGISTRAR VENTA</button>
+                <p style="font-size:0.8em; color:gray; text-align:center; margin-top:10px;">Cajero: <?php echo $_SESSION['user_full_name']; ?></p>
+            </div>
+        </form>
+        <?php endif; ?>
     </div>
 
-<script>
-    // ===============================================
-    // Bloque JavaScript para la Usabilidad (Versión 4.0)
-    // ===============================================
-    
-    const PRODUCTOS = <?php echo $productos_json; ?>.reduce((obj, item) => {
-        obj[item.id_producto] = item;
-        return obj;
-    }, {});
-    
-    const PRODUCTOS_OPTIONS_HTML = `<?php echo addslashes($productos_options_html); ?>`;
-    
-    const detalleBody = document.getElementById('detalle_body');
-    const totalDisplay = document.getElementById('total_display');
-    const montoTotalOculto = document.getElementById('monto_total_oculto');
-    let rowId = 0;
-    
-    
-    /**
-     * Calcula el subtotal de una fila y actualiza el total general.
-     */
-    function calculateSubtotal(row) {
-        const qtyInput = row.querySelector('.qty-input');
-        const priceInput = row.querySelector('.price-input');
-        const subtotalCell = row.querySelector('.subtotal-cell');
+    <script>
+        const productosDisponibles = <?php echo json_encode($productos_json); ?>;
+        
+        function agregarFila() {
+            const tr = document.createElement('tr');
+            let options = '<option value="">-- Seleccione --</option>';
+            productosDisponibles.forEach(p => {
+                options += `<option value="${p.id_producto}" data-precio="${p.costo_unitario}">${p.nombre_producto} (Stock: ${p.stock_actual})</option>`;
+            });
 
-        const qty = parseFloat(qtyInput.value) || 0;
-        const price_unitario = parseFloat(priceInput.value) || 0;
-        
-        const subtotal = qty * price_unitario;
-        
-        subtotalCell.textContent = '$' + subtotal.toFixed(2);
-        calculateTotal();
-    }
-    
-    /**
-     * Calcula el total de la transacción.
-     */
-    function calculateTotal() {
-        let total = 0;
-        const rows = detalleBody.querySelectorAll('tr');
-        
-        rows.forEach(row => {
-            const qty = parseFloat(row.querySelector('.qty-input').value) || 0;
-            const price_unitario = parseFloat(row.querySelector('.price-input').value) || 0;
-            
-            total += qty * price_unitario;
-        });
-
-        totalDisplay.textContent = '$' + total.toFixed(2);
-        montoTotalOculto.value = total.toFixed(2);
-    }
-    
-    /**
-     * Cuando se selecciona un producto, llena el campo de precio.
-     */
-    function setPrice(selectElement) {
-        const id_producto = selectElement.value;
-        const row = selectElement.closest('tr');
-        const priceInput = row.querySelector('.price-input');
-        
-        if (id_producto && PRODUCTOS[id_producto]) {
-            // Usar costo_unitario como precio_venta por defecto
-            priceInput.value = PRODUCTOS[id_producto].precio_venta_defecto.toFixed(2);
-        } else {
-            priceInput.value = ''; 
+            tr.innerHTML = `
+                <td><select class="prod-select" required onchange="actualizarPrecio(this)" style="width:100%">${options}</select></td>
+                <td><input type="number" class="cant-input" value="1" min="1" onchange="calcularTotales()" style="width:80px"></td>
+                <td><input type="number" class="precio-input" step="0.01" onchange="calcularTotales()" style="width:100px"></td>
+                <td class="subtotal-txt">$ 0.00</td>
+            `;
+            document.getElementById('cuerpoTabla').appendChild(tr);
         }
-        
-        // Enfoca la cantidad después de seleccionar el producto
-        calculateSubtotal(row);
-        row.querySelector('.qty-input').focus(); 
-    }
 
-    /**
-     * Añade una nueva fila a la tabla de detalles.
-     */
-    function addDetalleRow() {
-        
-        const newRow = document.createElement('tr');
-        newRow.setAttribute('data-row-id', rowId++);
-        newRow.innerHTML = `
-            <td>
-                <select class="product-select" onchange="setPrice(this)" required>
-                    ${PRODUCTOS_OPTIONS_HTML}
-                </select>
-            </td>
-            <td>
-                <input type="number" class="qty-input" value="1" min="1" oninput="calculateSubtotal(this.closest('tr'))" required>
-            </td>
-            <td>
-                <input type="number" class="price-input" step="0.01" placeholder="0.00" oninput="calculateSubtotal(this.closest('tr'))" required>
-            </td>
-            <td class="subtotal-cell">$0.00</td>
-            <td>
-                <button type="button" onclick="this.closest('tr').remove(); calculateTotal();" class="button-delete-inline">X</button>
-            </td>
-        `;
-        
-        detalleBody.appendChild(newRow);
-        
-        // Enfoca el nuevo select para agilizar la entrada
-        newRow.querySelector('.product-select').focus();
-    }
-    
-    /**
-     * Prepara los datos del formulario para el envío (Serialización JSON).
-     */
-    document.getElementById('transaccion_form').addEventListener('submit', function(event) {
-        event.preventDefault();
+        function actualizarPrecio(select) {
+            const precio = select.options[select.selectedIndex].getAttribute('data-precio');
+            const fila = select.closest('tr');
+            fila.querySelector('.precio-input').value = precio;
+            calcularTotales();
+        }
 
-        const detalles = [];
-        const rows = detalleBody.querySelectorAll('tr');
-        let totalCalculated = 0;
+        function calcularTotales() {
+            let totalGeneral = 0;
+            const filas = document.querySelectorAll('#cuerpoTabla tr');
+            const detalles = [];
 
-        rows.forEach(row => {
-            const id_producto = row.querySelector('.product-select').value;
-            const cantidad = parseFloat(row.querySelector('.qty-input').value);
-            const precio_venta = parseFloat(row.querySelector('.price-input').value);
-            
-            if (id_producto && cantidad > 0 && precio_venta >= 0) {
+            filas.forEach(fila => {
+                const id = fila.querySelector('.prod-select').value;
+                const cant = fila.querySelector('.cant-input').value;
+                const precio = fila.querySelector('.precio-input').value;
+                const subtotal = cant * precio;
                 
-                totalCalculated += cantidad * precio_venta;
-                
-                detalles.push({
-                    id_producto: id_producto,
-                    cantidad: cantidad,
-                    precio_venta: precio_venta, 
-                });
+                fila.querySelector('.subtotal-txt').innerText = '$ ' + subtotal.toFixed(2);
+                totalGeneral += subtotal;
+
+                if(id) detalles.push({ id_producto: id, cantidad: cant, precio_venta: precio });
+            });
+
+            document.getElementById('totalTxt').innerText = totalGeneral.toFixed(2);
+            document.getElementById('monto_total_oculto').value = totalGeneral;
+            document.getElementById('detalles_json').value = JSON.stringify(detalles);
+        }
+
+        document.getElementById('formVenta')?.addEventListener('submit', function(e) {
+            if(document.querySelectorAll('#cuerpoTabla tr').length === 0) {
+                alert("Agregue al menos un producto.");
+                e.preventDefault();
             }
         });
 
-        // Validaciones Finales
-        if (detalles.length === 0) {
-            alert('Debe ingresar al menos una línea de producto válida.');
-            return;
-        }
+        // Iniciar con una fila
+        if(document.getElementById('cuerpoTabla')) agregarFila();
         
-        // Validación de Referencia Bancaria
-        const referenciaBanco = document.getElementById('referencia_banco').value.trim();
-        if (!referenciaBanco) {
-            alert('El número de referencia bancaria es obligatorio.');
-            return;
-        }
-
-        // Asignar los datos serializados y el total final al formulario
-        document.getElementById('detalles_json').value = JSON.stringify(detalles);
-        document.getElementById('monto_total_oculto').value = totalCalculated.toFixed(2);
-
-        // Finalmente, envía el formulario
-        this.submit();
-    });
-
-    // ===============================================
-    // Inicialización y Bindings
-    // ===============================================
-
-    document.addEventListener('DOMContentLoaded', () => {
-        addDetalleRow(); 
-    });
-
-    // Atajo de teclado
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'F8') {
-            e.preventDefault();
-            addDetalleRow();
-        }
-    });
-</script>
+        // Atajo F8
+        window.addEventListener('keydown', (e) => { if(e.key === 'F8') agregarFila(); });
+    </script>
 </body>
 </html>

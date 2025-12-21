@@ -1,136 +1,167 @@
 <?php
-// dashboard.php
-
-// ===============================================
-// Bloque PHP 1: SEGURIDAD, CONEXIÓN y LÓGICA (Versión 1.2)
-// ===============================================
-
+// dashboard.php - Panel Principal del Sistema SCL
 ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-include 'includes/auth.php'; 
-require_login(); 
-include 'includes/db_connect.php'; 
+include 'includes/auth.php';
+require_login(); // Verifica que el usuario esté logueado
+include 'includes/db_connect.php';
 
-$pagina_activa = 'dashboard'; 
-$fecha_actual = date('Y-m-d'); 
+$pagina_activa = 'inicio';
 
-// 1. OBTENER PARÁMETROS CRÍTICOS
-$sql_params = "SELECT umbral_tolerancia_efectivo, umbral_conciliacion_bancaria, dias_stock_seguridad, dias_obsolescencia FROM parametros_negocio WHERE id_parametro = 1";
-$resultado_params = $conn->query($sql_params); 
+// 1. OBTENER ESTADO DE LA JORNADA
+$id_jornada_activa = obtenerJornadaActiva($conn);
 
-if ($resultado_params && $resultado_params->num_rows > 0) {
-    $params_db = $resultado_params->fetch_assoc();
-} else {
-    $params_db = [
-        'umbral_tolerancia_efectivo' => 5.0, 
-        'umbral_conciliacion_bancaria' => 2.0,
-        'dias_stock_seguridad' => 5,
-        'dias_obsolescencia' => 30
-    ];
+// 2. OBTENER ESTADÍSTICAS RÁPIDAS (Solo si hay jornada abierta)
+$ventas_hoy = 0;
+$monto_hoy = 0.00;
+$productos_criticos = 0;
+
+if ($id_jornada_activa) {
+    // Sumar ventas de la jornada actual
+    $sql_ventas = "SELECT COUNT(id_registro) as total_c, SUM(monto_total) as total_m 
+                   FROM transacciones 
+                   WHERE id_jornada_fk = $id_jornada_activa AND tipo_transaccion = 'Venta'";
+    $res_v = $conn->query($sql_ventas);
+    if ($res_v) {
+        $data_v = $res_v->fetch_assoc();
+        $ventas_hoy = $data_v['total_c'] ?? 0;
+        $monto_hoy = $data_v['total_m'] ?? 0.00;
+    }
 }
 
-$umbral_riesgo_tdc = $params_db['umbral_conciliacion_bancaria'] / 100; 
+// 3. ALERTAS DE INVENTARIO (Semáforo)
+$res_inv = $conn->query("SELECT COUNT(*) as criticos FROM inventario WHERE stock_actual <= 5");
+$productos_criticos = $res_inv->fetch_assoc()['criticos'];
 
-// --- 2. KPI 1: Tasa de Descuadre Crítico (TDC) ---
-$sql_stats = "SELECT SUM(monto_ventas_sistema) AS total_ventas, SUM(ABS(diferencia)) AS total_descuadre FROM control_jornadas WHERE estado_jornada = 0";
-$res_stats = $conn->query($sql_stats);
-$stats = ($res_stats) ? $res_stats->fetch_assoc() : null;
-
-$total_ventas = $stats['total_ventas'] ?? 0;
-$total_descuadre_real = $stats['total_descuadre'] ?? 0;
-$tdc_porcentaje = ($total_ventas > 0) ? ($total_descuadre_real / $total_ventas) * 100 : 0;
-
-if ($tdc_porcentaje/100 > $umbral_riesgo_tdc) {
-    $alerta_tdc = 'alerta-roja';
-    $mensaje_tdc = "CRÍTICO (Riesgo Alto).";
-} else {
-    $alerta_tdc = 'alerta-verde';
-    $mensaje_tdc = "OK (Riesgo Bajo).";
-}
-
-// --- 3. KPI 2: Días de Rotación de Inventario (DRI) ---
-$sql_dri = "SELECT AVG(stock_actual) as stock_promedio FROM inventario"; 
-$res_dri = $conn->query($sql_dri);
-$dato_dri = ($res_dri) ? $res_dri->fetch_assoc() : null;
-$stock_avg = $dato_dri['stock_promedio'] ?? 0;
-
-$dri = ($stock_avg > 0) ? ($stock_avg / 2) : 0; // Simplificado: asume consumo de 2 unidades/día si no hay historial
-
-if ($dri < $params_db['dias_stock_seguridad']) {
-    $alerta_dri = 'alerta-roja';
-    $mensaje_dri = "CRÍTICO. Quedan " . number_format($dri, 1) . " días.";
-} else {
-    $alerta_dri = 'alerta-verde';
-    $mensaje_dri = "OK. " . number_format($dri, 1) . " días restantes.";
-}
-
-// --- 4. KPI 3: Índice de Obsolescencia (IO) ---
-// CORRECCIÓN: Verificamos que la consulta no devuelva error
-$sql_io = "SELECT nombre_producto FROM inventario ORDER BY id_producto ASC LIMIT 1";
-$res_io = $conn->query($sql_io);
-
-if ($res_io && $res_io->num_rows > 0) {
-    $datos_io = $res_io->fetch_assoc();
-    $nombre_prod_lento = $datos_io['nombre_producto'];
-    $dias_inactividad = 0; // Por defecto 0 si es nuevo
-} else {
-    $nombre_prod_lento = "Sin productos";
-    $dias_inactividad = 0;
-}
-
-$alerta_io = ($dias_inactividad > $params_db['dias_obsolescencia']) ? 'alerta-roja' : 'alerta-verde';
 ?>
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SCL - Dashboard Ejecutivo</title>
     <link rel="stylesheet" href="css/style.css">
+    <style>
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border-left: 5px solid #2563eb;
+        }
+        .card.critico { border-left-color: #e11d48; }
+        .card.exito { border-left-color: #10b981; }
+        .card h3 { margin: 0; color: #64748b; font-size: 0.9rem; text-transform: uppercase; }
+        .card .valor { font-size: 1.8rem; font-weight: bold; margin-top: 10px; color: #1e293b; }
+        
+        .status-bar {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #e2e8f0;
+        }
+        .badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        .badge-open { background: #dcfce7; color: #166534; }
+        .badge-closed { background: #fee2e2; color: #991b1b; }
+        
+        .btn-action {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #2563eb;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        .btn-action:hover { background: #1d4ed8; }
+    </style>
 </head>
 <body>
-    <?php include 'includes/menu.php'; ?> 
-    
-    <div class="report-container"> 
-        <header class="report-header">
-            <h1>🎯 DASHBOARD EJECUTIVO SCL</h1>
-            <p><strong>Control de Gestión de Inventario</strong> | Estado Actual</p>
-            <hr>
-        </header>
+
+    <?php include 'includes/menu.php'; ?>
+
+    <div style="padding: 30px; max-width: 1200px; margin: 0 auto;">
         
-        <div class="kpi-grid">
-            <div class="kpi-card <?php echo $alerta_tdc; ?>">
-                <h3>1. RIESGO FINANCIERO (TDC)</h3>
-                <p>Desviación: **<?php echo number_format($tdc_porcentaje, 2); ?>%**</p>
-                <strong><?php echo $mensaje_tdc; ?></strong>
-            </div>
+        <header style="margin-bottom: 30px;">
+            <h1>Bienvenido, <?php echo htmlspecialchars($_SESSION['user_full_name']); ?></h1>
+            <p style="color: #64748b;">Rol: <strong><?php echo $_SESSION['user_role']; ?></strong> | <?php echo date('d/m/Y'); ?></p>
+        </header>
 
-            <div class="kpi-card <?php echo $alerta_dri; ?>">
-                <h3>2. RIESGO DE STOCK (DRI)</h3>
-                <p>Cobertura: **<?php echo number_format($dri, 1); ?> días**</p>
-                <strong><?php echo $mensaje_dri; ?></strong>
+        <div class="status-bar">
+            <div>
+                <span>Estado de Caja: </span>
+                <?php if ($id_jornada_activa): ?>
+                    <span class="badge badge-open">● JORNADA ABIERTA (#<?php echo $id_jornada_activa; ?>)</span>
+                <?php else: ?>
+                    <span class="badge badge-closed">○ JORNADA CERRADA</span>
+                <?php endif; ?>
             </div>
-
-            <div class="kpi-card <?php echo $alerta_io; ?>">
-                <h3>3. CAPITAL MUERTO (IO)</h3>
-                <p>Producto: <?php echo $nombre_prod_lento; ?></p>
-                <strong>Estado: Saludable</strong>
+            <div>
+                <?php if ($id_jornada_activa): ?>
+                    <a href="gestion/form_transacciones.php" class="btn-action">🛒 IR A VENTAS (F8)</a>
+                    <?php if ($_SESSION['user_role'] == 'Supervisor' || $_SESSION['user_role'] == 'Administrador'): ?>
+                        <a href="gestion/form_cierre_caja.php" style="color: #e11d48; margin-left: 15px; font-weight: bold;">Cerrar Jornada</a>
+                    <?php endif; ?>
+                <?php else: ?>
+                    <a href="gestion/form_jornada.php" class="btn-action" style="background: #10b981;">🟢 ABRIR JORNADA</a>
+                <?php endif; ?>
             </div>
         </div>
 
-        <section class="links-acceso cierre-final">
-            <h2>Acceso a Reportes</h2>
-            <div class="firmas">
-                <div class="firma-box">
-                    <a href="reporte_a1.php" class="button button-a1">Reporte A.1 (Cierre)</a>
-                </div>
-                <div class="firma-box">
-                    <a href="reporte_a2.php" class="button button-a2">Reporte A.2 (Bancos)</a>
-                </div>
+        <div class="dashboard-grid">
+            <div class="card">
+                <h3>Ventas Realizadas</h3>
+                <div class="valor"><?php echo $ventas_hoy; ?></div>
+                <p style="font-size: 0.8rem; color: #94a3b8;">En la jornada actual</p>
             </div>
-        </section>
+
+            <div class="card exito">
+                <h3>Total Ingresos (Bruto)</h3>
+                <div class="valor">$<?php echo number_format($monto_hoy, 2); ?></div>
+                <p style="font-size: 0.8rem; color: #94a3b8;">Monto acumulado hoy</p>
+            </div>
+
+            <div class="card <?php echo ($productos_criticos > 0) ? 'critico' : ''; ?>">
+                <h3>Alertas de Stock</h3>
+                <div class="valor"><?php echo $productos_criticos; ?></div>
+                <p style="font-size: 0.8rem; color: #94a3b8;">Productos por agotarse</p>
+            </div>
+        </div>
+
+        <?php if ($_SESSION['user_role'] != 'Vendedor'): ?>
+        <div style="margin-top: 40px;">
+            <h2>Control Administrativo</h2>
+            <div style="display: flex; gap: 15px; margin-top: 15px;">
+                <a href="reporte_a1.php" class="card" style="text-decoration: none; flex: 1; border-left: 5px solid #6366f1;">
+                    <h3 style="color: #4338ca;">Reporte A.1</h3>
+                    <p style="margin-top: 5px; color: #1e293b;">Conciliación de Caja</p>
+                </a>
+                <a href="gestion/form_inventario.php" class="card" style="text-decoration: none; flex: 1; border-left: 5px solid #f59e0b;">
+                    <h3 style="color: #b45309;">Inventario</h3>
+                    <p style="margin-top: 5px; color: #1e293b;">Gestión de Productos</p>
+                </a>
+            </div>
+        </div>
+        <?php endif; ?>
+
     </div>
+
 </body>
 </html>

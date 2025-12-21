@@ -1,76 +1,55 @@
 <?php
-// ===============================================
-// Bloque PHP 1: SEGURIDAD, CONEXIÓN y LÓGICA DE CARGA
-// ===============================================
+// gestion/form_cierre_caja.php
 include '../includes/auth.php'; 
-require_login(); 
+require_login(['Administrador', 'Supervisor']); 
 include '../includes/db_connect.php'; 
 
 $mensaje_estado = "";
+$clase_mensaje = "";
 
+$id_usuario_actual = $_SESSION['user_id'];
+$id_jornada = obtenerJornadaActiva($conn);
 
-// --- 1. Obtener parámetros (Configuración) ---
-$sql_params = "SELECT umbral_tolerancia_efectivo, fondo_caja_inicial FROM parametros_negocio LIMIT 1";
-$params_result = $conn->query($sql_params);
+// 1. Cálculos de Arqueo
+$total_venta_efectivo = 0;
+$monto_apertura = 0;
 
-// Verificación robusta para evitar el Fatal Error
-if ($params_result && $params_result->num_rows > 0) {
-    $params = $params_result->fetch_assoc();
-    $umbral_tolerancia = $params['umbral_tolerancia_efectivo'] ?? 5.00;
-    $fondo_caja_inicial = $params['fondo_caja_inicial'] ?? 200.00;
-} else {
-    // Valores de rescate si la tabla parámetros está vacía o falla
-    $umbral_tolerancia = 5.00;
-    $fondo_caja_inicial = 200.00;
+if ($id_jornada) {
+    // Sumamos ventas de la jornada actual
+    $sql_v = "SELECT SUM(monto_total) as total FROM transacciones 
+              WHERE id_jornada_fk = $id_jornada AND metodo_pago = 'Efectivo'";
+    $res_v = $conn->query($sql_v);
+    if ($res_v) $total_venta_efectivo = $res_v->fetch_assoc()['total'] ?? 0;
+
+    $sql_j = "SELECT monto_apertura FROM control_jornadas WHERE id_jornada = $id_jornada";
+    $res_j = $conn->query($sql_j);
+    if ($res_j) $monto_apertura = $res_j->fetch_assoc()['monto_apertura'] ?? 0;
 }
 
-// --- 2. Obtener lista de supervisores para el Select ---
-$sql_supervisores = "SELECT id_usuario, user_full_name FROM usuarios WHERE role IN ('Supervisor', 'Admin')";
-$resultado_supervisores = $conn->query($sql_supervisores);
+$total_esperado = $monto_apertura + $total_venta_efectivo;
 
-// 3. Obtener el total de efectivo registrado para el día (solo lectura/validación)
-$fecha_hoy = date('Y-m-d');
-$sql_venta_registrada = "SELECT SUM(monto_venta) AS total_registrado FROM transacciones 
-                         WHERE fecha_venta = '{$fecha_hoy}' AND tipo_cobro = 'Efectivo' AND es_egreso = 0";
-$resultado_venta = $conn->query($sql_venta_registrada);
-$total_venta_registrada = $resultado_venta->fetch_assoc()['total_registrado'] ?? 0.00;
+// 2. Proceso de Cierre al enviar el formulario
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['btn_finalizar_cierre'])) {
+    $conteo_fisico = floatval($_POST['conteo_manual_efectivo']);
+    $obs = $conn->real_escape_string($_POST['observaciones']);
 
-$total_efectivo_esperado = $total_venta_registrada;
-if ($requiere_conteo_inicial) {
-    $total_efectivo_esperado += $fondo_caja_inicial;
-}
+    // SQL Corregido para coincidir con la estructura de arriba
+    $sql_update = "UPDATE control_jornadas SET 
+                   id_usuario_cierre_fk = $id_usuario_actual, 
+                   fecha_cierre = NOW(), 
+                   monto_cierre_real = $conteo_fisico, 
+                   observaciones = '$obs',
+                   estado_jornada = 'Cerrada' 
+                   WHERE id_jornada = $id_jornada";
 
-
-// ===============================================
-// Bloque PHP 2: LÓGICA DE PROCESAMIENTO (POST)
-// ===============================================
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $conteo_manual = floatval($_POST['conteo_manual_efectivo']);
-    $supervisor_id = intval($_POST['supervisor_cierre']);
-    $observaciones = $conn->real_escape_string($_POST['observaciones']);
-    $cajero_id = $_SESSION['user_id'];
-
-    $diferencia = $conteo_manual - $total_efectivo_esperado;
-    $umbral = $params['umbral_tolerancia_efectivo'];
-    
-    // Determinar el Código de Validación basado en la lógica del Reporte A.1
-    $codigo_final = (abs($diferencia) > $umbral) ? 'X' : 'Z';
-    
-    // Aquí se insertaría el registro de cierre en una nueva tabla 'cierres_caja'
-    $sql_insert = "INSERT INTO cierres_caja 
-                   (fecha_cierre, id_cajero_fk, id_supervisor_fk, monto_contado, monto_esperado, diferencia, codigo_validacion, observaciones) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-                   
-    $stmt = $conn->prepare($sql_insert);
-    $stmt->bind_param("siiiddss", $fecha_hoy, $cajero_id, $supervisor_id, $conteo_manual, $total_efectivo_esperado, $diferencia, $codigo_final, $observaciones);
-
-    if ($stmt->execute()) {
-        $mensaje_estado = "<div class='alerta-verde'>✅ Cierre de caja registrado exitosamente. Código: **{$codigo_final}**.</div>";
-        // Aquí se podría redirigir al Reporte A.1 para que el cajero imprima.
+    if ($conn->query($sql_update)) {
+        $mensaje_estado = "✅ Jornada cerrada con éxito. El sistema de ventas se ha bloqueado.";
+        $clase_mensaje = "alerta-verde";
+        $id_jornada = false; 
     } else {
-        $mensaje_estado = "<div class='alerta-roja'>❌ Error al registrar el cierre: " . $stmt->error . "</div>";
+        $mensaje_estado = "❌ Error técnico: " . $conn->error;
+        $clase_mensaje = "alerta-roja";
     }
-    $stmt->close();
 }
 ?>
 
@@ -78,52 +57,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Formulario Cierre de Caja</title>
-    <link rel="stylesheet" href="../css/style.css"> 
+    <title>Cierre de Caja - SCL</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <style>
+        .cierre-container { max-width: 500px; margin: 40px auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .resumen-arqueo { background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e2e8f0; }
+        .monto-grande { font-size: 24px; font-weight: bold; color: #1e40af; display: block; margin-top: 5px; }
+        .alerta-verde { color: #15803d; background: #f0fdf4; padding: 15px; border-radius: 8px; text-align: center; font-weight: bold; }
+        .alerta-roja { color: #b91c1c; background: #fef2f2; padding: 15px; border-radius: 8px; text-align: center; }
+    </style>
 </head>
 <body>
     <?php include '../includes/menu.php'; ?>
-    
-    <div class="report-container">
-        <h1>🔒 Cierre Diario de Caja (Día: <?php echo $fecha_hoy; ?>)</h1>
-        <?php echo $mensaje_estado; ?>
+
+    <div class="cierre-container">
+        <h2>Finalizar Jornada</h2>
         
-        <form method="POST" action="form_cierre_caja.php">
+        <?php if ($mensaje_estado): ?>
+            <div class="<?php echo $clase_mensaje; ?>"><?php echo $mensaje_estado; ?></div>
+            <div style="text-align:center; margin-top:20px;"><a href="../dashboard.php" class="btn-login">Ir al Dashboard</a></div>
+        <?php elseif ($id_jornada): ?>
             
-            <fieldset>
-                <legend>Datos de Trazabilidad</legend>
-                <p><strong>Cajero Responsable:</strong> <?php echo $_SESSION['user_full_name'] ?? 'N/A'; ?></p>
-                
-                <label for="supervisor_cierre">Supervisor/Auditor de Cierre (D4):</label>
-                <select name="supervisor_cierre" id="supervisor_cierre" required>
-                    <option value="">-- Seleccione Supervisor --</option>
-                    <?php while ($sup = $resultado_supervisores->fetch_assoc()): ?>
-                        <option value="<?php echo $sup['id_usuario']; ?>"><?php echo $sup['user_full_name']; ?></option>
-                    <?php endwhile; ?>
-                </select>
-            </fieldset>
+            <div class="resumen-arqueo">
+                <small>EFECTIVO ESPERADO (Apertura + Ventas):</small>
+                <span class="monto-grande">$<?php echo number_format($total_esperado, 2); ?></span>
+            </div>
 
-            <fieldset>
-                <legend>Cuadre de Efectivo</legend>
-                
-                <p><strong>Fondo de Caja (Inicial):</strong> $<?php echo number_format($requiere_conteo_inicial ? $fondo_caja_inicial : 0.00, 2); ?></p>
-                <p><strong>Venta Efectivo Registrada (D1):</strong> $<?php echo number_format($total_venta_registrada, 2); ?></p>
-                <p style="font-size: 1.2em; font-weight: bold;">TOTAL ESPERADO EN CAJA: $<?php echo number_format($total_efectivo_esperado, 2); ?></p>
-                
-                <hr>
+            <form method="POST">
+                <label>Monto Real en Caja (Físico):</label>
+                <input type="number" step="0.01" name="conteo_manual_efectivo" required autofocus
+                       style="width:100%; padding:15px; font-size:20px; border: 2px solid #cbd5e1; border-radius:8px; margin-bottom:20px;">
 
-                <label for="conteo_manual_efectivo">Monto Contado Físicamente (Código X/Z):</label>
-                <input type="number" step="0.01" min="0" name="conteo_manual_efectivo" id="conteo_manual_efectivo" required placeholder="Ej: 1475.00">
-            </fieldset>
-            
-            <fieldset>
-                <legend>Observaciones</legend>
-                <label for="observaciones">Observaciones (Requerido si hay descuadre):</label>
-                <textarea name="observaciones" id="observaciones" rows="3"></textarea>
-            </fieldset>
+                <label>Observaciones / Novedades:</label>
+                <textarea name="observaciones" rows="3" style="width:100%; border-radius:8px; border: 1px solid #cbd5e1; padding:10px;"></textarea>
 
-            <button type="submit" class="boton-primario">Registrar Cierre y Generar Reporte A.1</button>
-        </form>
+                <p style="font-size: 0.85rem; color: #64748b; margin-top: 15px;">
+                    Responsable: <strong><?php echo $_SESSION['user_full_name']; ?></strong>
+                </p>
+
+                <button type="submit" name="btn_finalizar_cierre" class="btn-login" 
+                        style="background:#e11d48; width:100%; margin-top:20px; padding:15px;">
+                    CONFIRMAR CIERRE DE CAJA
+                </button>
+            </form>
+
+        <?php endif; ?>
     </div>
 </body>
 </html>

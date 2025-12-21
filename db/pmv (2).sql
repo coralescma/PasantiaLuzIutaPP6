@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Servidor: 127.0.0.1
--- Tiempo de generación: 16-12-2025 a las 14:12:21
+-- Tiempo de generación: 21-12-2025 a las 04:44:50
 -- Versión del servidor: 10.4.32-MariaDB
 -- Versión de PHP: 8.0.30
 
@@ -18,7 +18,7 @@ SET time_zone = "+00:00";
 /*!40101 SET NAMES utf8mb4 */;
 
 --
--- Base de datos: `pmv1`
+-- Base de datos: `pmv`
 --
 
 -- --------------------------------------------------------
@@ -99,25 +99,64 @@ INSERT INTO `control` (`id_control`, `fecha`, `id_cajero_fk`, `monto_registrado_
 
 CREATE TABLE `control_jornadas` (
   `id_jornada` int(11) NOT NULL,
-  `fecha` date NOT NULL,
-  `id_usuario_fk` int(11) NOT NULL,
+  `fecha_apertura` datetime DEFAULT NULL,
+  `id_usuario_apertura_fk` int(11) DEFAULT NULL,
   `id_usuario_cierre_fk` int(11) DEFAULT NULL,
   `monto_apertura` decimal(10,2) NOT NULL,
   `monto_ventas_sistema` decimal(10,2) DEFAULT 0.00,
   `monto_conteo_fisico` decimal(10,2) DEFAULT 0.00,
   `diferencia` decimal(10,2) DEFAULT 0.00,
-  `estado_jornada` int(11) DEFAULT 1,
+  `estado_jornada` varchar(20) DEFAULT 'Abierta',
   `notas` text DEFAULT NULL,
   `apertura_timestamp` timestamp NOT NULL DEFAULT current_timestamp(),
-  `cierre_timestamp` datetime DEFAULT NULL
+  `cierre_timestamp` datetime DEFAULT NULL,
+  `fecha_cierre` datetime DEFAULT NULL,
+  `monto_cierre_real` decimal(10,2) DEFAULT NULL,
+  `observaciones` text DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Volcado de datos para la tabla `control_jornadas`
 --
 
-INSERT INTO `control_jornadas` (`id_jornada`, `fecha`, `id_usuario_fk`, `id_usuario_cierre_fk`, `monto_apertura`, `monto_ventas_sistema`, `monto_conteo_fisico`, `diferencia`, `estado_jornada`, `notas`, `apertura_timestamp`, `cierre_timestamp`) VALUES
-(1, '2025-12-14', 1, NULL, 200.00, 0.00, 0.00, 0.00, 1, 'Jornada de regularización de ventas pasadas', '2025-12-16 08:07:13', NULL);
+INSERT INTO `control_jornadas` (`id_jornada`, `fecha_apertura`, `id_usuario_apertura_fk`, `id_usuario_cierre_fk`, `monto_apertura`, `monto_ventas_sistema`, `monto_conteo_fisico`, `diferencia`, `estado_jornada`, `notas`, `apertura_timestamp`, `cierre_timestamp`, `fecha_cierre`, `monto_cierre_real`, `observaciones`) VALUES
+(1, '2025-12-14 00:00:00', 1, 1, 200.00, 0.00, 0.00, 0.00, 'Cerrada', 'Jornada de regularización de ventas pasadas', '2025-12-16 08:07:13', NULL, '2025-12-20 23:06:23', 0.00, 'primer cierre'),
+(2, '2025-12-20 23:23:16', 1, NULL, 230.00, 0.00, 0.00, 0.00, 'Abierta', NULL, '2025-12-21 03:23:16', NULL, NULL, NULL, NULL);
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `detalle_egresos`
+--
+
+CREATE TABLE `detalle_egresos` (
+  `id_detalle` int(11) NOT NULL,
+  `id_transaccion_fk` bigint(20) DEFAULT NULL,
+  `id_producto_fk` int(11) DEFAULT NULL,
+  `cantidad` int(11) NOT NULL,
+  `motivo` varchar(100) NOT NULL,
+  `usuario_autorizador` varchar(50) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_spanish_ci;
+
+--
+-- Volcado de datos para la tabla `detalle_egresos`
+--
+
+INSERT INTO `detalle_egresos` (`id_detalle`, `id_transaccion_fk`, `id_producto_fk`, `cantidad`, `motivo`, `usuario_autorizador`) VALUES
+(1, 3003, 3, 3, 'Vencimiento', 'Supervisor');
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `detalle_pago`
+--
+
+CREATE TABLE `detalle_pago` (
+  `id_detalle` int(11) NOT NULL,
+  `id_transaccion_fk` int(11) NOT NULL,
+  `metodo_pago` enum('Efectivo','Tarjeta','Transferencia') NOT NULL,
+  `monto_pago` decimal(10,2) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
@@ -145,7 +184,10 @@ INSERT INTO `detalle_transaccion` (`id_detalle`, `id_transaccion_fk`, `id_produc
 (2, 2, 3, 1, 5.00, 0, NULL, NULL),
 (3, 2, 2, 1, 1.25, 0, NULL, NULL),
 (4, 2, 1, 1, 8.50, 0, NULL, NULL),
-(5, 3, 1, 1, 8.50, 0, NULL, NULL);
+(5, 3, 1, 1, 8.50, 0, NULL, NULL),
+(6, 4, 1, 1, 8.50, 0, NULL, NULL),
+(7, 4, 3, 2, 5.00, 0, NULL, NULL),
+(8, 4, 2, 3, 1.25, 0, NULL, NULL);
 
 -- --------------------------------------------------------
 
@@ -177,22 +219,21 @@ INSERT INTO `historial_tasa_de_cambio` (`id_tasa`, `fecha`, `tasa_usd_ves`, `usu
 
 CREATE TABLE `inventario` (
   `id_producto` int(11) NOT NULL,
-  `nombre_producto` varchar(255) NOT NULL,
-  `stock_actual` int(11) NOT NULL DEFAULT 0,
+  `nombre_producto` varchar(100) NOT NULL,
+  `stock_actual` int(11) NOT NULL,
   `costo_unitario` decimal(10,2) NOT NULL,
-  `ultima_venta_fecha` date DEFAULT NULL,
-  `proveedor` varchar(255) DEFAULT NULL,
-  `fecha_registro` timestamp NOT NULL DEFAULT current_timestamp()
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `ultima_venta_fecha` date DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_spanish_ci;
 
 --
 -- Volcado de datos para la tabla `inventario`
 --
 
-INSERT INTO `inventario` (`id_producto`, `nombre_producto`, `stock_actual`, `costo_unitario`, `ultima_venta_fecha`, `proveedor`, `fecha_registro`) VALUES
-(1, 'Café Molido Gourmet 250g', 147, 8.50, '2025-12-16', NULL, '2025-12-16 01:21:17'),
-(2, 'Tostada Integral', 299, 1.25, '2025-12-16', NULL, '2025-12-16 01:21:17'),
-(3, 'Jugo Natural de Naranja (Litro)', 49, 5.00, '2025-12-16', NULL, '2025-12-16 01:21:17');
+INSERT INTO `inventario` (`id_producto`, `nombre_producto`, `stock_actual`, `costo_unitario`, `ultima_venta_fecha`) VALUES
+(1, 'Café Americano', 20, 1.50, '2025-12-14'),
+(2, 'Bebida Energética X', 150, 2.50, '2025-10-01'),
+(3, 'Pan de Jamón', 50, 4.00, '2025-12-13'),
+(4, 'Cachito', 10, 30.00, '2025-12-15');
 
 -- --------------------------------------------------------
 
@@ -202,17 +243,20 @@ INSERT INTO `inventario` (`id_producto`, `nombre_producto`, `stock_actual`, `cos
 
 CREATE TABLE `parametros_negocio` (
   `id_parametro` int(11) NOT NULL,
-  `umbral_tolerancia_efectivo` decimal(5,2) NOT NULL DEFAULT 5.00,
-  `umbral_conciliacion_bancaria` decimal(5,2) NOT NULL DEFAULT 2.00,
-  `efectivo_requiere_conteo_inicial` tinyint(1) NOT NULL DEFAULT 1
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `nombre_parametro` varchar(50) NOT NULL,
+  `valor_numerico` decimal(10,2) NOT NULL,
+  `descripcion` varchar(255) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_spanish_ci;
 
 --
 -- Volcado de datos para la tabla `parametros_negocio`
 --
 
-INSERT INTO `parametros_negocio` (`id_parametro`, `umbral_tolerancia_efectivo`, `umbral_conciliacion_bancaria`, `efectivo_requiere_conteo_inicial`) VALUES
-(1, 5.00, 2.00, 1);
+INSERT INTO `parametros_negocio` (`id_parametro`, `nombre_parametro`, `valor_numerico`, `descripcion`) VALUES
+(13, 'Umbral_Tolerancia_Efectivo', 5.00, 'Diferencia máxima aceptada en el cuadre de caja (USD).'),
+(14, 'Tasa_Riesgo_TDC', 0.02, 'Umbral para la Alerta Roja de Tasa de Descuadre Crítico (2.0%).'),
+(15, 'Dias_Stock_Seguridad', 5.00, 'Días mínimos de inventario para el KPI 7 (DRI).'),
+(16, 'Dias_Obsolescencia', 60.00, 'Días sin venta para clasificar un producto como Inventario Muerto (KPI 8).');
 
 -- --------------------------------------------------------
 
@@ -224,7 +268,7 @@ CREATE TABLE `roles_y_privilegios` (
   `id_rol` int(11) NOT NULL,
   `nombre_rol` varchar(50) NOT NULL,
   `descripcion` varchar(255) DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_spanish_ci;
 
 --
 -- Volcado de datos para la tabla `roles_y_privilegios`
@@ -265,49 +309,32 @@ INSERT INTO `tipo_movimiento` (`id_tipo_movimiento`, `nombre_movimiento`, `tipo_
 --
 
 CREATE TABLE `transacciones` (
-  `id_transaccion` int(11) NOT NULL,
-  `fecha_venta` date NOT NULL,
-  `monto_venta` decimal(10,2) NOT NULL,
-  `tipo_cobro` enum('Efectivo','TPV','Pago_Movil','N/A') NOT NULL,
-  `es_egreso` tinyint(1) NOT NULL DEFAULT 0,
-  `usuario_registro` varchar(100) NOT NULL,
-  `referencia_banco` varchar(255) DEFAULT NULL,
-  `fecha_registro` timestamp NOT NULL DEFAULT current_timestamp()
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+  `id_registro` bigint(20) NOT NULL,
+  `id_usuario_cajero_fk` int(11) DEFAULT NULL,
+  `id_jornada_fk` int(11) DEFAULT NULL,
+  `fecha_transaccion` datetime DEFAULT NULL,
+  `turno` varchar(10) DEFAULT NULL,
+  `tipo_cobro` varchar(20) NOT NULL,
+  `monto_total` decimal(10,2) DEFAULT NULL,
+  `es_egreso` tinyint(1) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_spanish_ci;
 
 --
 -- Volcado de datos para la tabla `transacciones`
 --
 
-INSERT INTO `transacciones` (`id_transaccion`, `fecha_venta`, `monto_venta`, `tipo_cobro`, `es_egreso`, `usuario_registro`, `referencia_banco`, `fecha_registro`) VALUES
-(1, '2025-12-16', 8.50, 'TPV', 0, 'admin', '131', '2025-12-16 02:18:46'),
-(2, '2025-12-16', 14.75, 'Pago_Movil', 0, 'admin', '32453', '2025-12-16 02:19:17'),
-(3, '2025-12-16', 8.50, 'Pago_Movil', 0, 'admin', '5232', '2025-12-16 08:33:45');
-
--- --------------------------------------------------------
-
---
--- Estructura de tabla para la tabla `usuario`
---
-
-CREATE TABLE `usuario` (
-  `id_usuario` int(11) NOT NULL,
-  `id_rol_fk` int(11) NOT NULL,
-  `nombre` varchar(100) NOT NULL,
-  `usuario` varchar(50) NOT NULL,
-  `contrasena_hash` varchar(255) NOT NULL,
-  `estado` enum('Activo','Inactivo') DEFAULT 'Activo'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
---
--- Volcado de datos para la tabla `usuario`
---
-
-INSERT INTO `usuario` (`id_usuario`, `id_rol_fk`, `nombre`, `usuario`, `contrasena_hash`, `estado`) VALUES
-(101, 2, 'Ana López', 'ana.lopez', 'hash123', 'Activo'),
-(102, 3, 'Gerente de Turno', 'gerente', 'hash123', 'Activo'),
-(103, 4, 'Maria Castillo', 'm.castillo', 'hash123', 'Activo'),
-(104, 1, 'Admin Master', 'admin', 'hash123', 'Activo');
+INSERT INTO `transacciones` (`id_registro`, `id_usuario_cajero_fk`, `id_jornada_fk`, `fecha_transaccion`, `turno`, `tipo_cobro`, `monto_total`, `es_egreso`) VALUES
+(1001, NULL, NULL, '2025-12-10 00:00:00', 'Tarde', 'Efectivo', 1250.00, 0),
+(1002, NULL, NULL, '2025-12-10 00:00:00', 'Tarde', 'TPV', 3750.00, 0),
+(2001, NULL, NULL, '2025-12-11 00:00:00', 'Tarde', 'Efectivo', 1500.00, 0),
+(2002, NULL, NULL, '2025-12-11 00:00:00', 'Tarde', 'Pago_Movil', 3600.00, 0),
+(3001, NULL, NULL, '2025-12-12 00:00:00', 'Mañana', 'Efectivo', 1100.00, 0),
+(3002, NULL, NULL, '2025-12-12 00:00:00', 'Mañana', 'TPV', 3700.00, 0),
+(3003, NULL, NULL, '2025-12-12 00:00:00', 'Mañana', 'N/A', 12.00, 1),
+(4001, NULL, NULL, '2025-12-13 00:00:00', 'Tarde', 'Efectivo', 1600.00, 0),
+(4002, NULL, NULL, '2025-12-13 00:00:00', 'Tarde', 'TPV', 4000.00, 0),
+(5001, NULL, NULL, '2025-12-14 00:00:00', 'Mañana', 'Efectivo', 1200.00, 0),
+(5002, NULL, NULL, '2025-12-14 00:00:00', 'Mañana', 'Pago_Movil', 3700.00, 0);
 
 -- --------------------------------------------------------
 
@@ -320,16 +347,17 @@ CREATE TABLE `usuarios` (
   `username` varchar(50) NOT NULL,
   `password_hash` varchar(255) NOT NULL,
   `user_full_name` varchar(100) NOT NULL,
-  `rol` enum('Administrador','Supervisor','Cajero') NOT NULL,
-  `estado` enum('Activo','Inactivo') NOT NULL DEFAULT 'Activo'
+  `estado` enum('Activo','Inactivo') NOT NULL DEFAULT 'Activo',
+  `id_rol_fk` int(11) DEFAULT 2
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Volcado de datos para la tabla `usuarios`
 --
 
-INSERT INTO `usuarios` (`id_usuario`, `username`, `password_hash`, `user_full_name`, `rol`, `estado`) VALUES
-(1, 'admin', '$2y$10$fQ7xH4c7tN2/qQ8nS/2H0.w0f0jR7g0pQ.xGjTf2.hD6E.V1E.V5', 'Administrador Principal', 'Administrador', 'Activo');
+INSERT INTO `usuarios` (`id_usuario`, `username`, `password_hash`, `user_full_name`, `estado`, `id_rol_fk`) VALUES
+(1, 'admin', '$2y$10$9xHeMTr1a3zpluHXmLhsZOik7rkgI3h35.M88siJb60fN0t1B.rau', 'Administrador Principal', 'Activo', 1),
+(2, 'mcorales', '$2y$10$5F8B1sVi2NKY6JePFHzAhO19/rLUmhq693BdtF4vv8ZxG8AroHsSC', 'Marcos Corales', 'Activo', 3);
 
 --
 -- Índices para tablas volcadas
@@ -363,8 +391,23 @@ ALTER TABLE `control`
 --
 ALTER TABLE `control_jornadas`
   ADD PRIMARY KEY (`id_jornada`),
-  ADD KEY `id_usuario_fk` (`id_usuario_fk`),
-  ADD KEY `fk_usuario_cierre` (`id_usuario_cierre_fk`);
+  ADD KEY `fk_jornada_apertura` (`id_usuario_apertura_fk`),
+  ADD KEY `fk_jornada_cierre` (`id_usuario_cierre_fk`);
+
+--
+-- Indices de la tabla `detalle_egresos`
+--
+ALTER TABLE `detalle_egresos`
+  ADD PRIMARY KEY (`id_detalle`),
+  ADD KEY `id_transaccion_fk` (`id_transaccion_fk`),
+  ADD KEY `id_producto_fk` (`id_producto_fk`);
+
+--
+-- Indices de la tabla `detalle_pago`
+--
+ALTER TABLE `detalle_pago`
+  ADD PRIMARY KEY (`id_detalle`),
+  ADD KEY `id_transaccion_fk` (`id_transaccion_fk`);
 
 --
 -- Indices de la tabla `detalle_transaccion`
@@ -391,7 +434,8 @@ ALTER TABLE `inventario`
 -- Indices de la tabla `parametros_negocio`
 --
 ALTER TABLE `parametros_negocio`
-  ADD PRIMARY KEY (`id_parametro`);
+  ADD PRIMARY KEY (`id_parametro`),
+  ADD UNIQUE KEY `nombre_parametro` (`nombre_parametro`);
 
 --
 -- Indices de la tabla `roles_y_privilegios`
@@ -410,22 +454,15 @@ ALTER TABLE `tipo_movimiento`
 -- Indices de la tabla `transacciones`
 --
 ALTER TABLE `transacciones`
-  ADD PRIMARY KEY (`id_transaccion`);
-
---
--- Indices de la tabla `usuario`
---
-ALTER TABLE `usuario`
-  ADD PRIMARY KEY (`id_usuario`),
-  ADD UNIQUE KEY `usuario` (`usuario`),
-  ADD KEY `id_rol_fk` (`id_rol_fk`);
+  ADD PRIMARY KEY (`id_registro`);
 
 --
 -- Indices de la tabla `usuarios`
 --
 ALTER TABLE `usuarios`
   ADD PRIMARY KEY (`id_usuario`),
-  ADD UNIQUE KEY `username` (`username`);
+  ADD UNIQUE KEY `username` (`username`),
+  ADD KEY `fk_usuario_rol` (`id_rol_fk`);
 
 --
 -- AUTO_INCREMENT de las tablas volcadas
@@ -453,25 +490,25 @@ ALTER TABLE `control`
 -- AUTO_INCREMENT de la tabla `control_jornadas`
 --
 ALTER TABLE `control_jornadas`
-  MODIFY `id_jornada` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+  MODIFY `id_jornada` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=3;
 
 --
--- AUTO_INCREMENT de la tabla `detalle_transaccion`
+-- AUTO_INCREMENT de la tabla `detalle_egresos`
 --
-ALTER TABLE `detalle_transaccion`
-  MODIFY `id_detalle` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
-
---
--- AUTO_INCREMENT de la tabla `historial_tasa_de_cambio`
---
-ALTER TABLE `historial_tasa_de_cambio`
-  MODIFY `id_tasa` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+ALTER TABLE `detalle_egresos`
+  MODIFY `id_detalle` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
 
 --
 -- AUTO_INCREMENT de la tabla `inventario`
 --
 ALTER TABLE `inventario`
-  MODIFY `id_producto` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+  MODIFY `id_producto` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+
+--
+-- AUTO_INCREMENT de la tabla `parametros_negocio`
+--
+ALTER TABLE `parametros_negocio`
+  MODIFY `id_parametro` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=17;
 
 --
 -- AUTO_INCREMENT de la tabla `roles_y_privilegios`
@@ -480,76 +517,15 @@ ALTER TABLE `roles_y_privilegios`
   MODIFY `id_rol` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
 
 --
--- AUTO_INCREMENT de la tabla `tipo_movimiento`
---
-ALTER TABLE `tipo_movimiento`
-  MODIFY `id_tipo_movimiento` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
-
---
--- AUTO_INCREMENT de la tabla `transacciones`
---
-ALTER TABLE `transacciones`
-  MODIFY `id_transaccion` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
-
---
--- AUTO_INCREMENT de la tabla `usuario`
---
-ALTER TABLE `usuario`
-  MODIFY `id_usuario` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=105;
-
---
--- AUTO_INCREMENT de la tabla `usuarios`
---
-ALTER TABLE `usuarios`
-  MODIFY `id_usuario` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
-
---
 -- Restricciones para tablas volcadas
 --
 
 --
--- Filtros para la tabla `conciliacion`
+-- Filtros para la tabla `detalle_egresos`
 --
-ALTER TABLE `conciliacion`
-  ADD CONSTRAINT `conciliacion_ibfk_1` FOREIGN KEY (`id_conciliacion_final_fk`) REFERENCES `conciliacion_final` (`id_conciliacion_final`);
-
---
--- Filtros para la tabla `conciliacion_final`
---
-ALTER TABLE `conciliacion_final`
-  ADD CONSTRAINT `conciliacion_final_ibfk_1` FOREIGN KEY (`id_auditor_fk`) REFERENCES `usuario` (`id_usuario`);
-
---
--- Filtros para la tabla `control`
---
-ALTER TABLE `control`
-  ADD CONSTRAINT `control_ibfk_1` FOREIGN KEY (`id_cajero_fk`) REFERENCES `usuario` (`id_usuario`);
-
---
--- Filtros para la tabla `control_jornadas`
---
-ALTER TABLE `control_jornadas`
-  ADD CONSTRAINT `control_jornadas_ibfk_1` FOREIGN KEY (`id_usuario_fk`) REFERENCES `usuarios` (`id_usuario`),
-  ADD CONSTRAINT `fk_usuario_cierre` FOREIGN KEY (`id_usuario_cierre_fk`) REFERENCES `usuarios` (`id_usuario`);
-
---
--- Filtros para la tabla `detalle_transaccion`
---
-ALTER TABLE `detalle_transaccion`
-  ADD CONSTRAINT `detalle_transaccion_ibfk_1` FOREIGN KEY (`id_transaccion_fk`) REFERENCES `transacciones` (`id_transaccion`),
-  ADD CONSTRAINT `detalle_transaccion_ibfk_2` FOREIGN KEY (`id_producto_fk`) REFERENCES `inventario` (`id_producto`);
-
---
--- Filtros para la tabla `historial_tasa_de_cambio`
---
-ALTER TABLE `historial_tasa_de_cambio`
-  ADD CONSTRAINT `historial_tasa_de_cambio_ibfk_1` FOREIGN KEY (`usuario_modifico`) REFERENCES `usuario` (`id_usuario`);
-
---
--- Filtros para la tabla `usuario`
---
-ALTER TABLE `usuario`
-  ADD CONSTRAINT `usuario_ibfk_1` FOREIGN KEY (`id_rol_fk`) REFERENCES `roles_y_privilegios` (`id_rol`);
+ALTER TABLE `detalle_egresos`
+  ADD CONSTRAINT `detalle_egresos_ibfk_1` FOREIGN KEY (`id_transaccion_fk`) REFERENCES `transacciones` (`id_registro`),
+  ADD CONSTRAINT `detalle_egresos_ibfk_2` FOREIGN KEY (`id_producto_fk`) REFERENCES `inventario` (`id_producto`);
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
