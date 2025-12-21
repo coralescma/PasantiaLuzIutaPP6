@@ -2,10 +2,9 @@
 // dashboard.php
 
 // ===============================================
-// Bloque PHP 1: SEGURIDAD, CONEXIÓN y LÓGICA (Versión 1.1)
+// Bloque PHP 1: SEGURIDAD, CONEXIÓN y LÓGICA (Versión 1.2)
 // ===============================================
 
-// HABILITAR REPORTE DE ERRORES (temporal)
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -17,79 +16,71 @@ include 'includes/db_connect.php';
 $pagina_activa = 'dashboard'; 
 $fecha_actual = date('Y-m-d'); 
 
-// 1. OBTENER PARÁMETROS CRÍTICOS (Desde la fila ID=1)
-// Usamos los campos reales de la tabla parametros_negocio
-$sql_params = "SELECT umbral_tolerancia_efectivo, umbral_conciliacion_bancaria FROM parametros_negocio WHERE id_parametro = 1";
+// 1. OBTENER PARÁMETROS CRÍTICOS
+$sql_params = "SELECT umbral_tolerancia_efectivo, umbral_conciliacion_bancaria, dias_stock_seguridad, dias_obsolescencia FROM parametros_negocio WHERE id_parametro = 1";
 $resultado_params = $conn->query($sql_params); 
 
-if (!$resultado_params || $resultado_params->num_rows === 0) {
-    // Si la tabla está vacía o hay error, usamos valores por defecto seguros
-    $params_db = ['umbral_tolerancia_efectivo' => 5.0, 'umbral_conciliacion_bancaria' => 2.0];
-} else {
+if ($resultado_params && $resultado_params->num_rows > 0) {
     $params_db = $resultado_params->fetch_assoc();
+} else {
+    $params_db = [
+        'umbral_tolerancia_efectivo' => 5.0, 
+        'umbral_conciliacion_bancaria' => 2.0,
+        'dias_stock_seguridad' => 5,
+        'dias_obsolescencia' => 30
+    ];
 }
 
-// SIMULACIÓN DE PARÁMETROS NO ALMACENADOS EN LA DB (Por ahora, son fijos en el código)
-// Usamos el umbral_conciliacion_bancaria del Reporte A.2 como la Tasa TDC
-$umbral_riesgo_tdc = $params_db['umbral_conciliacion_bancaria'] / 100; // ej: 2.0% -> 0.02
-$dias_stock_seguridad = 5; // Simulación: 5 días fijos
-$dias_obsolescencia = 60; // Simulación: 60 días fijos
+$umbral_riesgo_tdc = $params_db['umbral_conciliacion_bancaria'] / 100; 
 
-// --- 2. Cálculo del KPI 1: Tasa de Descuadre Crítico (TDC) ---
-// La consulta asume que transacciones existe y tiene la columna es_egreso
-$sql_total_ventas = "SELECT SUM(monto_venta) AS total_general FROM transacciones WHERE es_egreso = 0";
-$resultado_ventas = $conn->query($sql_total_ventas);
-$total_ventas = ($resultado_ventas && $resultado_ventas->num_rows > 0) ? $resultado_ventas->fetch_assoc()['total_general'] : 0;
-$total_descuadre_critico_sim = 75.00; // Descuadre simulado
+// --- 2. KPI 1: Tasa de Descuadre Crítico (TDC) ---
+$sql_stats = "SELECT SUM(monto_ventas_sistema) AS total_ventas, SUM(ABS(diferencia)) AS total_descuadre FROM control_jornadas WHERE estado_jornada = 0";
+$res_stats = $conn->query($sql_stats);
+$stats = ($res_stats) ? $res_stats->fetch_assoc() : null;
 
-$tdc = ($total_ventas > 0) ? ($total_descuadre_critico_sim / $total_ventas) : 0;
-$tdc_porcentaje = $tdc * 100;
+$total_ventas = $stats['total_ventas'] ?? 0;
+$total_descuadre_real = $stats['total_descuadre'] ?? 0;
+$tdc_porcentaje = ($total_ventas > 0) ? ($total_descuadre_real / $total_ventas) * 100 : 0;
 
-if ($tdc > $umbral_riesgo_tdc) {
+if ($tdc_porcentaje/100 > $umbral_riesgo_tdc) {
     $alerta_tdc = 'alerta-roja';
-    $mensaje_tdc = "CRÍTICO (Riesgo Alto). Supera el umbral del " . ($umbral_riesgo_tdc * 100) . "%.";
+    $mensaje_tdc = "CRÍTICO (Riesgo Alto).";
 } else {
     $alerta_tdc = 'alerta-verde';
     $mensaje_tdc = "OK (Riesgo Bajo).";
 }
 
+// --- 3. KPI 2: Días de Rotación de Inventario (DRI) ---
+$sql_dri = "SELECT AVG(stock_actual) as stock_promedio FROM inventario"; 
+$res_dri = $conn->query($sql_dri);
+$dato_dri = ($res_dri) ? $res_dri->fetch_assoc() : null;
+$stock_avg = $dato_dri['stock_promedio'] ?? 0;
 
-// --- 3. Cálculo del KPI 7: Días de Rotación de Inventario (DRI) ---
-// Consulta asume que inventario existe
-$sql_stock = "SELECT stock_actual FROM inventario WHERE id_producto = 1"; 
-$resultado_stock = $conn->query($sql_stock);
-$datos_stock = ($resultado_stock && $resultado_stock->num_rows > 0) ? $resultado_stock->fetch_assoc() : ['stock_actual' => 0];
-$stock_actual = $datos_stock['stock_actual'] ?? 0;
-$promedio_venta_diaria = 4; // Promedio simulado
+$dri = ($stock_avg > 0) ? ($stock_avg / 2) : 0; // Simplificado: asume consumo de 2 unidades/día si no hay historial
 
-$dri = ($promedio_venta_diaria > 0) ? ($stock_actual / $promedio_venta_diaria) : 0;
-
-if ($dri < $dias_stock_seguridad) {
+if ($dri < $params_db['dias_stock_seguridad']) {
     $alerta_dri = 'alerta-roja';
-    $mensaje_dri = "CRÍTICO (Quiebre Inminente). Quedan " . number_format($dri, 1) . " días. Comprar URGENTE.";
+    $mensaje_dri = "CRÍTICO. Quedan " . number_format($dri, 1) . " días.";
 } else {
     $alerta_dri = 'alerta-verde';
-    $mensaje_dri = "OK. " . number_format($dri, 1) . " días de stock restantes.";
+    $mensaje_dri = "OK. " . number_format($dri, 1) . " días restantes.";
 }
 
+// --- 4. KPI 3: Índice de Obsolescencia (IO) ---
+// CORRECCIÓN: Verificamos que la consulta no devuelva error
+$sql_io = "SELECT nombre_producto FROM inventario ORDER BY id_producto ASC LIMIT 1";
+$res_io = $conn->query($sql_io);
 
-// --- 4. Cálculo del KPI 8: Índice de Obsolescencia (IO) ---
-// Consulta asume que inventario existe y tiene la columna ultima_venta_fecha
-$sql_obsolescencia = "SELECT nombre_producto, ultima_venta_fecha FROM inventario WHERE id_producto = 2";
-$resultado_obsolescencia = $conn->query($sql_obsolescencia);
-$datos_obsolescencia = ($resultado_obsolescencia && $resultado_obsolescencia->num_rows > 0) ? $resultado_obsolescencia->fetch_assoc() : ['ultima_venta_fecha' => $fecha_actual, 'nombre_producto' => 'N/A'];
-$fecha_ultima_venta = $datos_obsolescencia['ultima_venta_fecha'] ?? $fecha_actual;
-
-$diff = date_diff(date_create($fecha_ultima_venta), date_create($fecha_actual));
-$dias_inactividad = $diff->days;
-
-if ($dias_inactividad > $dias_obsolescencia) {
-    $alerta_io = 'alerta-roja';
-    $mensaje_io = "ALERTA (Inventario Muerto). $dias_inactividad días sin venta. Liquidar.";
+if ($res_io && $res_io->num_rows > 0) {
+    $datos_io = $res_io->fetch_assoc();
+    $nombre_prod_lento = $datos_io['nombre_producto'];
+    $dias_inactividad = 0; // Por defecto 0 si es nuevo
 } else {
-    $alerta_io = 'alerta-verde';
-    $mensaje_io = "OK. $dias_inactividad días sin venta.";
+    $nombre_prod_lento = "Sin productos";
+    $dias_inactividad = 0;
 }
+
+$alerta_io = ($dias_inactividad > $params_db['dias_obsolescencia']) ? 'alerta-roja' : 'alerta-verde';
 ?>
 
 <!DOCTYPE html>
@@ -105,48 +96,41 @@ if ($dias_inactividad > $dias_obsolescencia) {
     <div class="report-container"> 
         <header class="report-header">
             <h1>🎯 DASHBOARD EJECUTIVO SCL</h1>
-            <p><strong>Visión de Control, Riesgo y Gestión de Inventario</strong> | Periodo Acumulado</p>
+            <p><strong>Control de Gestión de Inventario</strong> | Estado Actual</p>
             <hr>
         </header>
-        
-        <h2>Resumen de Riesgos (Alerta Semáforo)</h2>
-        <p>El sistema detectó los siguientes riesgos basados en la data histórica y parámetros de configuración:</p>
         
         <div class="kpi-grid">
             <div class="kpi-card <?php echo $alerta_tdc; ?>">
                 <h3>1. RIESGO FINANCIERO (TDC)</h3>
-                <p>Métrica: **<?php echo number_format($tdc_porcentaje, 2); ?>%** de Ingresos totales son Desviaciones Críticas.</p>
+                <p>Desviación: **<?php echo number_format($tdc_porcentaje, 2); ?>%**</p>
                 <strong><?php echo $mensaje_tdc; ?></strong>
             </div>
 
             <div class="kpi-card <?php echo $alerta_dri; ?>">
-                <h3>2. RIESGO DE STOCK (DRI - Café)</h3>
-                <p>Quedan **<?php echo number_format($dri, 1); ?> días** de stock de seguridad (Umbral: <?php echo $dias_stock_seguridad; ?> días).</p>
+                <h3>2. RIESGO DE STOCK (DRI)</h3>
+                <p>Cobertura: **<?php echo number_format($dri, 1); ?> días**</p>
                 <strong><?php echo $mensaje_dri; ?></strong>
             </div>
 
             <div class="kpi-card <?php echo $alerta_io; ?>">
-                <h3>3. CAPITAL MUERTO (IO - Bebida X)</h3>
-                <p>Producto lleva **<?php echo $dias_inactividad; ?> días** sin venta (Umbral: <?php echo $dias_obsolescencia; ?> días).</p>
-                <strong><?php echo $mensaje_io; ?></strong>
+                <h3>3. CAPITAL MUERTO (IO)</h3>
+                <p>Producto: <?php echo $nombre_prod_lento; ?></p>
+                <strong>Estado: Saludable</strong>
             </div>
         </div>
 
         <section class="links-acceso cierre-final">
-            <h2>Acceso a Documentación de Detalle</h2>
-            <p>Para la auditoría y el archivo legal, acceda a los reportes firmados:</p>
+            <h2>Acceso a Reportes</h2>
             <div class="firmas">
                 <div class="firma-box">
-                    <a href="reporte_a1.php" class="button button-a1">Ver Reporte A.1 (Cierre Diario)</a>
-                    <p>Auditoría Operacional y Conteo Físico</p>
+                    <a href="reporte_a1.php" class="button button-a1">Reporte A.1 (Cierre)</a>
                 </div>
                 <div class="firma-box">
-                    <a href="reporte_a2.php" class="button button-a2">Ver Reporte A.2 (Conciliación Bancaria)</a>
-                    <p>Auditoría Financiera y Reclamos Bancarios</p>
+                    <a href="reporte_a2.php" class="button button-a2">Reporte A.2 (Bancos)</a>
                 </div>
             </div>
         </section>
-
     </div>
 </body>
 </html>

@@ -1,109 +1,73 @@
 <?php
-// ===============================================================
-// HABILITAR REPORTE DE ERRORES (QUITAR EN PRODUCCIÓN)
-// Esto ayuda a evitar la pantalla en blanco (WSOD)
+// 1. Habilitar errores para ver qué falla exactamente si queda en blanco
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-// ===============================================================
 
-session_start();
+// 2. Ruta de seguridad: Intentar cargar auth.php
+// Verifica si el archivo existe antes de cargarlo para evitar el "pantallazo blanco"
+$auth_path = 'includes/auth.php';
 
-// Si el usuario ya está logueado, redirigir al dashboard inmediatamente
+if (file_exists($auth_path)) {
+    require_once $auth_path;
+} else {
+    die("Error crítico: No se encontró el archivo $auth_path. Verifica las carpetas.");
+}
+
+// 3. Redirección si ya está logueado
 if (isset($_SESSION['user_id'])) {
     header('Location: dashboard.php');
     exit;
 }
 
-// Incluir la conexión a la base de datos
-// Asumimos que este archivo define $conn
-include 'includes/db_connect.php'; 
-
 $login_error = "";
 
+// 4. Lógica de Post
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
     
-    // 1. LIMPIEZA DE ENTRADA
-    $username = $conn->real_escape_string($username);
-    // Nota: No saneamos la contraseña, ya que debe ser verificada en su forma original.
-
-    // 2. CONSULTA SQL CORREGIDA
-    // La corrección clave: usar 'usuarios' en lugar de 'usuario'
-    $sql = "SELECT id_usuario, password_hash, user_full_name, rol, estado FROM usuarios WHERE username = '$username'";
-    
-    $resultado = $conn->query($sql);
-    
-    // VERIFICACIÓN DE SEGURIDAD PARA EVITAR EL FATAL ERROR
-    if ($resultado === FALSE) {
-        // Error de SQL (ej: la tabla 'usuarios' sigue sin existir o está mal escrita)
-        error_log("Error SQL en login: " . $conn->error);
-        $login_error = "Error interno del sistema. Intente más tarde.";
-        
-    } elseif ($resultado->num_rows === 1) {
-        $usuario = $resultado->fetch_assoc();
-        
-        // 3. VERIFICACIÓN DE CONTRASEÑA
-        // Usamos password_verify para trabajar con el hash que insertamos
-        if (password_verify($password, $usuario['password_hash'])) {
-            
-            // 4. VERIFICACIÓN DE ESTADO
-            if ($usuario['estado'] === 'Activo') {
-                
-                // 5. INICIO DE SESIÓN EXITOSO
-                $_SESSION['user_id'] = $usuario['id_usuario'];
-                $_SESSION['username'] = $usuario['username'];
-                $_SESSION['user_full_name'] = $usuario['user_full_name'];
-                $_SESSION['rol'] = $usuario['rol'];
-                
-                header('Location: dashboard.php');
-                exit;
-                
-            } else {
-                $login_error = "Su cuenta está inactiva. Contacte al administrador.";
-            }
-        } else {
-            // Contraseña incorrecta
-            $login_error = "Nombre de usuario o contraseña incorrectos.";
-        }
+    // La función verificar_usuario ya usa la tabla 'usuarios' según lo que definimos
+    if (verificar_usuario($username, $password, $conn)) {
+        header('Location: dashboard.php');
+        exit;
     } else {
-        // Usuario no encontrado
-        $login_error = "Nombre de usuario o contraseña incorrectos.";
+        $login_error = "Credenciales incorrectas o usuario inactivo.";
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>SCL - Iniciar Sesión</title>
-    <link rel="stylesheet" href="css/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCL - Acceso</title>
+    <style>
+        body { font-family: sans-serif; background: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 300px; }
+        h2 { text-align: center; color: #333; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #2980b9; }
+        .error { color: #721c24; background: #f8d7da; padding: 10px; border-radius: 4px; font-size: 13px; margin-bottom: 10px; text-align: center; }
+    </style>
 </head>
-<body class="login-body">
-    <div class="login-container">
-        <header>
-            <h1>Sistema de Control y Liquidación (SCL)</h1>
-            <h2>Inicio de Sesión</h2>
-        </header>
+<body>
+    <div class="container">
+        <h2>Sistema SCL</h2>
         
         <?php if ($login_error): ?>
-            <div class="alerta-roja" style="padding: 10px; margin-bottom: 15px;"><?php echo $login_error; ?></div>
+            <div class="error"><?php echo $login_error; ?></div>
         <?php endif; ?>
 
-        <form action="index.php" method="post" class="login-form">
-            <div class="form-group">
-                <label for="username">Usuario:</label>
-                <input type="text" id="username" name="username" required autofocus>
-            </div>
-            <div class="form-group">
-                <label for="password">Contraseña:</label>
-                <input type="password" id="password" name="password" required>
-            </div>
+        <form method="POST">
+            <label>Usuario</label>
+            <input type="text" name="username" required autofocus>
             
-            <button type="submit" class="button button-a1">Entrar</button>
+            <label>Contraseña</label>
+            <input type="password" name="password" required>
+            
+            <button type="submit">Entrar</button>
         </form>
     </div>
 </body>

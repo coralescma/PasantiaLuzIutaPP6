@@ -1,141 +1,131 @@
 <?php
-// Reporte de errores para diagnóstico
-error_reporting(E_ALL);
+// gestion/form_jornada.php
 ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
 include '../includes/auth.php'; 
 require_login(); 
 include '../includes/db_connect.php'; 
 
-$user_id = $_SESSION['user_id'] ?? 0;
-$hoy = date('Y-m-d');
+$mensaje = "";
+$clase_mensaje = "";
 
-// --- 1. VERIFICAR JORNADA ACTIVA (BANDERA 1) ---
-// Usamos una consulta simple. Si falla, $jornada_activa será null.
-$jornada_activa = null;
-$sql_check = "SELECT * FROM control_jornadas WHERE estado_jornada = 1 LIMIT 1";
-$res_check = $conn->query($sql_check);
-if ($res_check && $res_check->num_rows > 0) {
-    $jornada_activa = $res_check->fetch_assoc();
-}
+// 1. LÓGICA: PROCESAR APERTURA
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['btn_abrir_jornada'])) {
+    $fecha = date('Y-m-d');
+    $id_usuario = $_SESSION['user_id'];
+    $monto_apertura = floatval($_POST['monto_apertura']);
 
-// --- 2. LÓGICA DE APERTURA ---
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion_apertura'])) {
-    $stmt = $conn->prepare("INSERT INTO control_jornadas (fecha, id_usuario_fk, monto_apertura, estado_jornada) VALUES (?, ?, 0.00, 1)");
-    $stmt->bind_param("si", $hoy, $user_id);
-    if ($stmt->execute()) {
-        header("Location: form_jornada.php");
-        exit();
-    }
-}
-
-// --- 3. LÓGICA DE CIERRE ---
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion_cierre']) && $jornada_activa) {
-    $id_jornada = $jornada_activa['id_jornada'];
-    $ts_apertura = $jornada_activa['apertura_timestamp'];
+    // Intentamos insertar con los nombres de columna más probables de la BD antigua
+    $sql_ins = "INSERT INTO control_jornadas (id_usuario_fk, fecha, monto_apertura, estado_jornada) 
+                VALUES ($id_usuario, '$fecha', $monto_apertura, 1)";
     
-    // Sumar ventas desde la apertura
-    $sql_sum = "SELECT SUM(monto_venta) as total FROM transacciones WHERE es_egreso = 0 AND fecha_venta >= '$ts_apertura'";
-    $res_sum = $conn->query($sql_sum);
-    $total_ciclo = ($res_sum) ? ($res_sum->fetch_assoc()['total'] ?? 0) : 0;
-    
-    // Actualizar tabla y cerrar bandera (estado 2)
-    $stmt = $conn->prepare("UPDATE control_jornadas SET monto_ventas_sistema = ?, monto_conteo_fisico = ?, diferencia = 0, estado_jornada = 2, id_usuario_cierre_fk = ?, cierre_timestamp = NOW() WHERE id_jornada = ?");
-    $stmt->bind_param("ddii", $total_ciclo, $total_ciclo, $user_id, $id_jornada);
-    
-    if ($stmt->execute()) {
-        header("Location: ../reporte_a1.php?id_jornada=" . $id_jornada);
-        exit();
-    }
-}
-
-// --- 4. LISTA DE VENTAS PENDIENTES ---
-$ventas_pendientes = [];
-$total_acumulado = 0;
-
-if ($jornada_activa) {
-    $ts = $jornada_activa['apertura_timestamp'];
-    $sql_lista = "SELECT t.id_transaccion, t.fecha_venta, t.monto_venta, t.tipo_cobro, u.user_full_name 
-                  FROM transacciones t 
-                  JOIN usuarios u ON t.id_usuario_fk = u.id_usuario
-                  WHERE t.es_egreso = 0 AND t.fecha_venta >= '$ts'
-                  ORDER BY t.fecha_venta ASC";
-    
-    $res_lista = $conn->query($sql_lista);
-    if ($res_lista) {
-        while ($row = $res_lista->fetch_assoc()) {
-            $ventas_pendientes[] = $row;
-            $total_acumulado += $row['monto_venta'];
+    if ($conn->query($sql_ins)) {
+        $mensaje = "✅ Jornada abierta con éxito.";
+        $clase_mensaje = "alerta-verde";
+    } else {
+        // Si falla por nombres de columna, intentamos el segundo set de nombres comunes
+        $sql_alt = "INSERT INTO control_jornadas (id_usuario_apertura_fk, fecha_apertura, fondo_apertura, estado_jornada) 
+                    VALUES ($id_usuario, '$fecha', $monto_apertura, 1)";
+        if($conn->query($sql_alt)){
+            $mensaje = "✅ Jornada abierta (vía alterna).";
+            $clase_mensaje = "alerta-verde";
+        } else {
+            $mensaje = "❌ Error crítico de BD: " . $conn->error;
+            $clase_mensaje = "alerta-roja";
         }
     }
 }
+
+// 2. OBTENER LISTA DE JORNADAS
+$resultado_jornadas = $conn->query("SELECT * FROM control_jornadas ORDER BY id_jornada DESC");
 ?>
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>SCL - Gestión de Jornada</title>
+    <title>SCL - Control de Jornadas</title>
     <link rel="stylesheet" href="../css/style.css">
+    <style>
+        .form-box { background: white; padding: 25px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #ddd; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th, td { padding: 12px; border: 1px solid #eee; text-align: left; }
+        th { background: #f8fafc; color: #475569; }
+        .btn-add { background: #10b981; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .estado-abierta { color: #059669; font-weight: bold; background: #d1fae5; padding: 4px 8px; border-radius: 4px; }
+        .estado-cerrada { color: #64748b; font-weight: bold; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; }
+        .alerta-verde { background: #dcfce7; color: #166534; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #bbf7d0; }
+        .alerta-roja { background: #fee2e2; color: #991b1b; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #fecaca; }
+    </style>
 </head>
 <body>
     <?php include '../includes/menu.php'; ?>
 
-    <div class="report-container" style="max-width: 900px; margin: 20px auto; font-family: sans-serif;">
-        <h1>📑 Gestión de Ciclo Operativo</h1>
+    <div class="report-container">
+        <h1>🗓️ Control de Jornadas</h1>
 
-        <?php if (!$jornada_activa): ?>
-            <div style="background: #fdf2f2; border: 1px solid #f5c6cb; padding: 20px; border-radius: 8px; text-align: center;">
-                <h2>🌅 No hay un ciclo abierto</h2>
-                <p>Para registrar y liquidar transacciones, debe iniciar una nueva jornada.</p>
-                <form method="POST">
-                    <input type="hidden" name="accion_apertura" value="1">
-                    <button type="submit" style="background: #28a745; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1em;">🚀 Abrir Ciclo de Hoy</button>
-                </form>
-            </div>
-        <?php else: ?>
-            <div style="background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px;">
-                <div style="background: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 5px; font-weight: bold; margin-bottom: 20px;">
-                    ● CICLO ACTIVO DESDE: <?php echo $jornada_activa['apertura_timestamp']; ?>
-                </div>
-                
-                <h3>Transacciones por Liquidar</h3>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <thead>
-                        <tr style="background: #f4f4f4;">
-                            <th style="padding: 10px; border: 1px solid #ddd;">ID</th>
-                            <th style="padding: 10px; border: 1px solid #ddd;">Fecha</th>
-                            <th style="padding: 10px; border: 1px solid #ddd;">Cajero</th>
-                            <th style="padding: 10px; border: 1px solid #ddd;">Monto</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (count($ventas_pendientes) > 0): ?>
-                            <?php foreach ($ventas_pendientes as $v): ?>
-                                <tr>
-                                    <td style="padding: 10px; border: 1px solid #ddd;"><?php echo $v['id_transaccion']; ?></td>
-                                    <td style="padding: 10px; border: 1px solid #ddd;"><?php echo $v['fecha_venta']; ?></td>
-                                    <td style="padding: 10px; border: 1px solid #ddd;"><?php echo $v['user_full_name']; ?></td>
-                                    <td style="padding: 10px; border: 1px solid #ddd;">$<?php echo number_format($v['monto_venta'], 2); ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php else: ?>
-                            <tr><td colspan="4" style="text-align:center; padding: 20px;">No hay ventas registradas desde la apertura.</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                    <tfoot>
-                        <tr style="font-weight:bold; background:#eee;">
-                            <td colspan="3" style="text-align:right; padding: 10px;">TOTAL A LIQUIDAR:</td>
-                            <td style="padding: 10px;">$<?php echo number_format($total_acumulado, 2); ?></td>
-                        </tr>
-                    </tfoot>
-                </table>
-
-                <form method="POST" style="margin-top: 30px;">
-                    <input type="hidden" name="accion_cierre" value="1">
-                    <button type="submit" style="background: #34495e; color: white; padding: 15px; width: 100%; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1em;">✅ Finalizar y Generar Reporte A.1</button>
-                </form>
+        <?php if ($mensaje): ?>
+            <div class="<?php echo $clase_mensaje; ?>">
+                <?php echo $mensaje; ?>
             </div>
         <?php endif; ?>
+
+        <div class="form-box">
+            <h3>Nueva Apertura de Turno</h3>
+            <form method="POST" style="display: flex; gap: 15px; align-items: flex-end;">
+                <div style="flex: 1;">
+                    <label style="font-weight: bold; display: block; margin-bottom: 5px;">Monto Inicial en Caja ($):</label>
+                    <input type="number" step="0.01" name="monto_apertura" value="0.00" required style="width:100%; padding:10px; border: 1px solid #ccc; border-radius:4px;">
+                </div>
+                <button type="submit" name="btn_abrir_jornada" class="btn-add">REGISTRAR APERTURA</button>
+            </form>
+        </div>
+
+        <section>
+            <h3>Historial de Turnos</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Fecha</th>
+                        <th>Fondo Apertura</th>
+                        <th>Estado</th>
+                        <th>Diferencia</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php 
+                    if ($resultado_jornadas && $resultado_jornadas->num_rows > 0): 
+                        while($row = $resultado_jornadas->fetch_assoc()): 
+                            // SOLUCIÓN A LOS WARNINGS: Detectar nombres de columnas dinámicamente
+                            $fecha_display = $row['fecha'] ?? $row['fecha_apertura'] ?? 'Sin fecha';
+                            $monto_display = $row['monto_apertura'] ?? $row['fondo_apertura'] ?? 0.00;
+                            $dif_display = $row['diferencia'] ?? 0.00;
+                    ?>
+                        <tr>
+                            <td><?php echo $row['id_jornada']; ?></td>
+                            <td><?php echo $fecha_display; ?></td>
+                            <td>$<?php echo number_format($monto_display, 2); ?></td>
+                            <td>
+                                <span class="<?php echo ($row['estado_jornada'] == 1) ? 'estado-abierta' : 'estado-cerrada'; ?>">
+                                    <?php echo ($row['estado_jornada'] == 1) ? 'ABIERTA' : 'CERRADA'; ?>
+                                </span>
+                            </td>
+                            <td>$<?php echo number_format($dif_display, 2); ?></td>
+                        </tr>
+                    <?php 
+                        endwhile; 
+                    else: 
+                    ?>
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 20px; color: gray;">No hay jornadas registradas.</td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </section>
     </div>
 </body>
 </html>

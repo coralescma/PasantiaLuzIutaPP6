@@ -1,156 +1,143 @@
 <?php
-// ===============================================
-// Bloque PHP 1: SEGURIDAD y CONEXIÓN (Ruta Corregida)
-// ===============================================
+// gestion/form_inventario.php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
-// 1. Incluir la seguridad y la sesión (auth.php)
+// 1. Incluir seguridad y conexión
 include '../includes/auth.php'; 
-// Protege la página y restringe el acceso solo a roles de control/administración.
-// Un Cajero (rol 2) no debería poder eliminar o registrar costos.
-require_login(['Administrador', 'Supervisor']); 
+require_login(); 
 
-// 2. Conexión a DB (Asegura que $conn esté disponible)
 include '../includes/db_connect.php'; 
 
 $mensaje = "";
 $clase_mensaje = "";
 
-// Define la página activa para el menú (si se usa para highlighting)
-$pagina_activa = 'gestion'; 
+// --- Lógica: Registrar Nuevo Producto (Ajustado a BD Antigua) ---
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['btn_guardar'])) {
+    $nombre = $conn->real_escape_string($_POST['nombre_producto']);
+    $stock = intval($_POST['stock_actual']);
+    $costo = floatval($_POST['costo_unitario']);
+    $fecha_actual_sql = date('Y-m-d'); // Para la columna ultima_venta_fecha o registro
 
-
-// --- Lógica de Procesamiento de Inserción (POST) ---
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $nombre_producto = $conn->real_escape_string($_POST['nombre_producto']);
-    $stock_actual = (int)$_POST['stock_actual'];
-    $costo_unitario = (float)$_POST['costo_unitario'];
-    $ultima_venta_fecha = $conn->real_escape_string($_POST['ultima_venta_fecha']);
-
-    if (empty($nombre_producto) || $stock_actual < 0 || $costo_unitario <= 0) {
-        $mensaje = "Error: Todos los campos obligatorios deben ser llenados correctamente.";
-        $clase_mensaje = "alerta-roja";
+    // SQL sin precio_venta
+    $sql_ins = "INSERT INTO inventario (nombre_producto, stock_actual, costo_unitario, ultima_venta_fecha) 
+                VALUES ('$nombre', $stock, $costo, '$fecha_actual_sql')";
+    
+    if ($conn->query($sql_ins)) {
+        $mensaje = "✅ Producto registrado con éxito.";
+        $clase_mensaje = "alerta-verde";
     } else {
-        $sql = "INSERT INTO inventario (nombre_producto, stock_actual, costo_unitario, ultima_venta_fecha) 
-                 VALUES ('$nombre_producto', $stock_actual, $costo_unitario, '$ultima_venta_fecha')";
-
-        if ($conn->query($sql) === TRUE) {
-            $mensaje = "✅ Producto '$nombre_producto' agregado exitosamente.";
-            $clase_mensaje = "alerta-verde";
-        } else {
-            $mensaje = "Error al agregar el producto: " . $conn->error;
-            $clase_mensaje = "alerta-roja";
-        }
+        $mensaje = "❌ Error: " . $conn->error;
+        $clase_mensaje = "alerta-roja";
     }
 }
 
-// --- Lógica de Eliminación (GET) ---
+// --- Lógica: Eliminar Producto ---
 if (isset($_GET['delete_id'])) {
-    // Solo permitir la eliminación al Administrador
-    if ($_SESSION['user_role'] != 'Administrador') {
-        $mensaje = "🚫 ACCESO DENEGADO. Solo el Administrador puede eliminar registros de inventario.";
-        $clase_mensaje = "alerta-roja";
-    } else {
-        $delete_id = (int)$_GET['delete_id'];
-        
-        // Ejecutar la eliminación
-        // IMPORTANTE: Asegurarse de que no haya claves foráneas que lo impidan (si el producto está en detalle_transaccion)
-        $sql_delete = "DELETE FROM inventario WHERE id_producto = $delete_id";
-        if ($conn->query($sql_delete) === TRUE) {
-            $mensaje = "✅ Producto ID **$delete_id** eliminado exitosamente.";
-            $clase_mensaje = "alerta-verde";
-            // Redirigir para limpiar el parámetro GET de la URL
-            // Nota: urlencode no es estrictamente necesario aquí si no pasas variables GET, pero es una buena práctica.
-            header("Location: form_inventario.php"); 
-            exit();
-        } else {
-            // El error más común aquí es la restricción de clave foránea.
-            $mensaje = "Error al eliminar el producto. Podría estar asociado a transacciones existentes: " . $conn->error;
-            $clase_mensaje = "alerta-roja";
-        }
-    }
+    $id_del = intval($_GET['delete_id']);
+    $conn->query("DELETE FROM inventario WHERE id_producto = $id_del");
+    header("Location: form_inventario.php?deleted=1");
+    exit();
 }
 
-// Lógica para mostrar mensaje después de la redirección
-// Recuperamos el mensaje si existe, aunque no usamos el `urlencode` en la redirección.
-// Si deseas mostrar el mensaje después de la redirección de eliminación, usa sesiones. 
-// Por simplicidad, volvemos a la lógica de POST/GET directo.
+if (isset($_GET['deleted'])) {
+    $mensaje = "✅ Producto eliminado.";
+    $clase_mensaje = "alerta-verde";
+}
 
-
-// --- Lógica para mostrar el inventario actual ---
-$sql_inventario = "SELECT id_producto, nombre_producto, stock_actual, costo_unitario, ultima_venta_fecha FROM inventario ORDER BY id_producto DESC";
-$resultado_inventario = $conn->query($sql_inventario);
+// 2. Obtener lista de productos
+$resultado_inventario = $conn->query("SELECT * FROM inventario ORDER BY id_producto DESC");
 ?>
 
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Gestión de Inventario (D5)</title>
+    <title>SCL - Gestión de Inventario</title>
     <link rel="stylesheet" href="../css/style.css">
+    <style>
+        .form-box { background: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #ddd; }
+        /* Reajustado a 3 columnas para que quepa mejor sin el precio */
+        .grid-inputs { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 15px; }
+        table { width: 100%; border-collapse: collapse; background: white; margin-top: 10px; }
+        th, td { padding: 12px; border: 1px solid #eee; text-align: left; }
+        th { background: #f8fafc; color: #334155; }
+        .btn-add { background: #2563eb; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; width: 100%; height: 45px; margin-top: 24px; font-weight: bold;}
+        .btn-del { color: #ef4444; text-decoration: none; font-weight: bold; }
+        .alerta-verde { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .alerta-roja { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    </style>
 </head>
 <body>
     <?php include '../includes/menu.php'; ?>
-    <div class="report-container">
-        <header class="report-header">
-            <h1>📦 Gestión de Inventario (D5)</h1>
-            <p>Control de Stock Actual y Costo Unitario para el cálculo de KPIs (DRI e IO).</p>
-        </header>
 
-        <?php if (!empty($mensaje)): ?>
-            <div class="recomendacion <?php echo $clase_mensaje; ?>"><?php echo $mensaje; ?></div>
+    <div class="report-container">
+        <h1>📦 Gestión de Inventario</h1>
+
+        <?php if ($mensaje): ?>
+            <div class="<?php echo $clase_mensaje; ?>" style="padding:15px; margin-bottom:20px; border-radius:5px;">
+                <?php echo $mensaje; ?>
+            </div>
         <?php endif; ?>
 
-        <section class="form-section">
-            <h2>➕ Registrar Nuevo Producto / Stock</h2>
-            <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post" class="data-form">
-                
-                <label for="nombre_producto">Nombre del Producto:</label>
-                <input type="text" id="nombre_producto" name="nombre_producto" required>
-
-                <label for="stock_actual">Stock Inicial/Actual (Unidades):</label>
-                <input type="number" id="stock_actual" name="stock_actual" required min="0">
-
-                <label for="costo_unitario">Costo Unitario ($):</label>
-                <input type="number" id="costo_unitario" name="costo_unitario" step="0.01" required min="0.01">
-
-                <label for="ultima_venta_fecha">Fecha de Última Venta (Para KPI 8 - Obsolescencia):</label>
-                <input type="date" id="ultima_venta_fecha" name="ultima_venta_fecha" value="<?php echo date('Y-m-d'); ?>" required>
-
-                <button type="submit" class="button button-a1">Guardar Producto</button>
+        <div class="form-box">
+            <h3>Registrar Nuevo Producto</h3>
+            <form method="POST">
+                <div class="grid-inputs">
+                    <div>
+                        <label>Nombre del Producto:</label>
+                        <input type="text" name="nombre_producto" required style="width:100%; padding:10px; border: 1px solid #ccc; border-radius:4px;">
+                    </div>
+                    <div>
+                        <label>Stock Inicial:</label>
+                        <input type="number" name="stock_actual" value="0" style="width:100%; padding:10px; border: 1px solid #ccc; border-radius:4px;">
+                    </div>
+                    <div>
+                        <label>Costo Unitario ($):</label>
+                        <input type="number" step="0.01" name="costo_unitario" required style="width:100%; padding:10px; border: 1px solid #ccc; border-radius:4px;">
+                    </div>
+                </div>
+                <button type="submit" name="btn_guardar" class="btn-add">GUARDAR PRODUCTO EN BASE DE DATOS</button>
             </form>
-        </section>
+        </div>
 
-        <section class="current-inventory">
-            <h2>🛒 Inventario Actual Registrado</h2>
-            <?php if ($resultado_inventario->num_rows > 0): ?>
-                <table>
+        <section>
+            <h3>Existencias actuales</h3>
+            <table>
+                <thead>
                     <tr>
                         <th>ID</th>
                         <th>Producto</th>
                         <th>Stock Actual</th>
-                        <th>Costo Unitario ($)</th>
-                        <th>Fecha Última Venta</th>
-                        <th style="text-align: center;">Acciones</th> </tr>
-                    <?php while($row = $resultado_inventario->fetch_assoc()): ?>
-                    <tr>
-                        <td><?php echo $row['id_producto']; ?></td>
-                        <td><?php echo $row['nombre_producto']; ?></td>
-                        <td><?php echo $row['stock_actual']; ?></td>
-                        <td><?php echo $row['costo_unitario']; ?></td>
-                        <td><?php echo $row['ultima_venta_fecha']; ?></td>
-                        <td style="text-align: center;">
-                            <a href="?delete_id=<?php echo $row['id_producto']; ?>" 
-                               onclick="return confirm('¿Estás seguro de que deseas eliminar permanentemente el producto ID <?php echo $row['id_producto']; ?>?')" 
-                               class="button button-delete">Eliminar</a>
-                        </td>
+                        <th>Costo Unitario</th>
+                        <th>Última Actividad</th>
+                        <th>Acciones</th>
                     </tr>
-                    <?php endwhile; ?>
-                </table>
-            <?php else: ?>
-                <p>No hay productos registrados en el inventario.</p>
-            <?php endif; ?>
+                </thead>
+                <tbody>
+                    <?php if ($resultado_inventario && $resultado_inventario->num_rows > 0): ?>
+                        <?php while($row = $resultado_inventario->fetch_assoc()): ?>
+                        <tr>
+                            <td><?php echo $row['id_producto']; ?></td>
+                            <td><strong><?php echo htmlspecialchars($row['nombre_producto']); ?></strong></td>
+                            <td><?php echo $row['stock_actual']; ?></td>
+                            <td>$<?php echo number_format($row['costo_unitario'], 2); ?></td>
+                            <td><?php echo $row['ultima_venta_fecha'] ?? 'Sin datos'; ?></td>
+                            <td>
+                                <a href="?delete_id=<?php echo $row['id_producto']; ?>" 
+                                   onclick="return confirm('¿Eliminar producto definitivamente?')" class="btn-del">Eliminar</a>
+                            </td>
+                        </tr>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: gray;">No hay productos registrados.</td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </section>
-
     </div>
 </body>
 </html>

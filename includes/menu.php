@@ -1,29 +1,30 @@
 <?php
 // includes/menu.php
 
-// Define la ruta base para asegurar que los enlaces funcionen desde cualquier carpeta.
 $base_path = '';
 if (basename(getcwd()) === 'gestion') {
     $base_path = '../';
 }
 
-// Verifica si la sesión está iniciada
 $logged_in = isset($_SESSION['user_id']);
 $user_display = $logged_in ? 
     ($_SESSION['user_full_name'] . ' (' . $_SESSION['user_role'] . ')') : 
     'Invitado';
+
+// Variable para marcar la página activa (puedes definirla en cada archivo antes de incluir el menú)
+$pagina_activa = $pagina_activa ?? '';
 ?>
 
 <nav class="main-menu">
     <div class="logo">SCL | Control y Liquidación</div>
     
     <ul>
-        <li><a href="<?php echo $base_path; ?>index.php" class="<?php echo ($pagina_activa === 'dashboard' ? 'active' : ''); ?>">Dashboard</a></li>
+        <li><a href="<?php echo $base_path; ?>index.php" class="<?php echo ($pagina_activa === 'inicio' ? 'active' : ''); ?>">Dashboard</a></li>
                 
         <li class="dropdown">
             <a href="#">Operaciones Diarias</a>
             <div class="dropdown-content">
-                <a href="<?php echo $base_path; ?>gestion/form_jornada.php" class="<?php echo ($pagina_activa === 'jornada' ? 'active' : ''); ?>">Gestión de Jornada (C.4)</a>
+                <a href="<?php echo $base_path; ?>gestion/form_jornada.php">Gestión de Jornada (C.4)</a>
                 <hr>
                 <a href="<?php echo $base_path; ?>gestion/form_transacciones.php">Registro de Venta (A.4)</a>
             </div>
@@ -32,8 +33,11 @@ $user_display = $logged_in ?
         <li class="dropdown">
             <a href="#">Administración</a>
             <div class="dropdown-content">
-                <a href="<?php echo $base_path; ?>gestion/form_inventario.php">Inventario (D.5)</a>
-                <a href="<?php echo $base_path; ?>gestion/form_parametros.php">Parámetros (D.4)</a>
+                <a href="<?php echo $base_path; ?>gestion/gestion_usuarios.php">👤 Usuarios y Privilegios</a>
+                <a href="<?php echo $base_path; ?>gestion/form_parametros.php">⚙️ Parámetros (D.4)</a>
+                <a href="<?php echo $base_path; ?>gestion/gestion_movimientos.php">🔄 Tipos de Movimiento</a>
+                <hr>
+                <a href="<?php echo $base_path; ?>gestion/form_inventario.php">📦 Inventario (D.5)</a>
             </div>
         </li>
         
@@ -51,9 +55,9 @@ $user_display = $logged_in ?
             <a href="#">👤 <?php echo $user_display; ?></a>
             <div class="dropdown-content">
                 <?php if ($logged_in): ?>
-                    <a href="<?php echo $base_path; ?>logout.php" title="Cerrar la sesión actual">Cerrar Sesión</a>
+                    <a href="<?php echo $base_path; ?>logout.php">Cerrar Sesión</a>
                 <?php else: ?>
-                    <a href="<?php echo $base_path; ?>login.php" title="Iniciar Sesión">Iniciar Sesión</a>
+                    <a href="<?php echo $base_path; ?>login.php">Iniciar Sesión</a>
                 <?php endif; ?>
             </div>
         </li>
