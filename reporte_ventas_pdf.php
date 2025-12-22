@@ -1,153 +1,151 @@
 <?php
-// ===============================================
-// Bloque PHP 1: SEGURIDAD, CONEXIÓN y LÓGICA
-// ===============================================
-
-// 1. INCLUSIÓN DE LIBRERÍAS (Si usas Composer)
-require 'vendor/autoload.php';
-
-use Dompdf\Dompdf;
-use Dompdf\Options;
-
-// 2. SEGURIDAD Y CONEXIÓN
+// reporte_contable_libro_final.php
+require('libs/fpdf/fpdf.php'); 
 include 'includes/auth.php'; 
-require_login(); 
+require_login(['Administrador', 'Contador']); 
 include 'includes/db_connect.php'; 
 
-// 3. OBTENCIÓN DE DATOS (Personalización del reporte)
-$fecha_inicio = '2025-12-01'; // Ejemplo: Personalización por rango de fecha
-$fecha_fin = '2025-12-15';
+$id_jornada_consulta = isset($_GET['id_jornada']) ? intval($_GET['id_jornada']) : 0;
 
-$sql_ventas = "
-    SELECT 
-        t.id_transaccion, 
-        t.fecha_venta, 
-        t.monto_venta, 
-        t.tipo_cobro,
-        u.user_full_name AS cajero
-    FROM transacciones t
-    JOIN usuarios u ON t.id_usuario_fk = u.id_usuario
-    WHERE t.es_egreso = 0 AND t.fecha_venta BETWEEN '{$fecha_inicio}' AND '{$fecha_fin}'
-    ORDER BY t.fecha_venta DESC;
-";
+if ($id_jornada_consulta <= 0) {
+    die(utf8_decode("Error: ID de jornada no válido."));
+}
 
-$resultado_ventas = $conn->query($sql_ventas);
-$total_ventas_periodo = 0;
-$datos_reporte = [];
+// --- 1. EXTRACCIÓN DE DATOS ---
 
-if ($resultado_ventas) {
-    while ($fila = $resultado_ventas->fetch_assoc()) {
-        $datos_reporte[] = $fila;
-        $total_ventas_periodo += $fila['monto_venta'];
+// A. Datos Maestros e Identidad
+$sql_jornada = "SELECT cj.*, u.username as nombre_usuario 
+                FROM control_jornadas cj 
+                LEFT JOIN usuarios u ON cj.id_usuario_apertura_fk = u.id_usuario 
+                WHERE cj.id_jornada = $id_jornada_consulta";
+$datos_j = $conn->query($sql_jornada)->fetch_assoc();
+
+// B. Ventas Totales
+$sql_v = "SELECT SUM(dp.monto_pago) as total FROM detalle_pago dp 
+          JOIN transacciones t ON dp.id_transaccion_fk = t.id_registro 
+          WHERE t.id_jornada_fk = $id_jornada_consulta AND t.es_egreso = 0";
+$ventas_totales = $conn->query($sql_v)->fetch_assoc()['total'] ?? 0;
+
+// C. Dinero en Banco (Solo conciliados)
+$sql_b = "SELECT SUM(dp.monto_pago) as total FROM detalle_pago dp 
+          JOIN transacciones t ON dp.id_transaccion_fk = t.id_registro 
+          WHERE t.id_jornada_fk = $id_jornada_consulta AND dp.conciliado_banco = 1 AND dp.id_metodo_fk IN (2,3)";
+$dinero_banco = $conn->query($sql_b)->fetch_assoc()['total'] ?? 0;
+
+// D. Diferencia Solicitada (Ventas - Banco)
+$diferencia_contable = $ventas_totales - $dinero_banco;
+
+// --- 2. CONFIGURACIÓN PDF ---
+
+class PDF extends FPDF {
+    function Header() {
+        $fecha_generacion = date('d/m/Y H:i:s');
+        $this->SetFont('Arial', 'B', 15);
+        $this->SetTextColor(30, 41, 59);
+        $this->Cell(0, 10, utf8_decode('REPORTE AUDITADO DE JORNADA'), 0, 1, 'C');
+        
+        $this->SetFont('Arial', 'I', 8);
+        $this->SetTextColor(100, 116, 139);
+        $this->Cell(0, 5, utf8_decode('Fecha y hora de emisión: ' . $fecha_generacion), 0, 1, 'R');
+        $this->Ln(5);
+    }
+
+    function Footer() {
+        $this->SetY(-15);
+        $this->SetFont('Arial', 'I', 8);
+        $this->Cell(0, 10, utf8_decode('Documento para Libro Contable - Página ').$this->PageNo().'/{nb}', 0, 0, 'C');
     }
 }
 
+$pdf = new PDF();
+$pdf->AliasNbPages();
+$pdf->AddPage();
 
-// ===============================================
-// Bloque PHP 2: GENERACIÓN DEL HTML PARA EL PDF
-// (Esta es la parte más personalizable)
-// ===============================================
+// --- ENCABEZADO DE DATOS ---
+$pdf->SetFillColor(241, 245, 249);
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(0, 8, utf8_decode('  IDENTIFICACIÓN DE LA OPERACIÓN'), 0, 1, 'L', true);
+$pdf->Ln(2);
 
-// Iniciar la captura del output buffer para guardar todo el HTML
-ob_start(); 
-?>
+$pdf->SetFont('Arial', 'B', 9); $pdf->Cell(40, 7, utf8_decode('Número de Jornada:'), 0);
+$pdf->SetFont('Arial', '', 9); $pdf->Cell(55, 7, $id_jornada_consulta, 0);
+$pdf->SetFont('Arial', 'B', 9); $pdf->Cell(40, 7, utf8_decode('Estado Actual:'), 0);
+$pdf->SetFont('Arial', 'B', 9);
+$estado = strtoupper($datos_j['estado_jornada']);
+if($estado == 'VALIDADA') $pdf->SetTextColor(16, 185, 129); else $pdf->SetTextColor(245, 158, 11);
+$pdf->Cell(55, 7, utf8_decode($estado), 0, 1);
 
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Reporte de Ventas SCL</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
-        .header { background-color: #f2f2f2; padding: 10px; text-align: center; border-bottom: 2px solid #333; }
-        .header h1 { color: #004d40; margin: 0; }
-        .periodo { text-align: right; font-size: 10px; margin-bottom: 15px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 10px; }
-        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-        th { background-color: #004d40; color: white; }
-        .total-box { margin-top: 20px; padding: 10px; border: 2px solid #004d40; width: 300px; float: right; }
-        .total-box p { margin: 0; font-size: 14px; font-weight: bold; }
-        .footer { position: fixed; bottom: 0; width: 100%; text-align: center; font-size: 8px; color: #777; }
-    </style>
-</head>
-<body>
+$pdf->SetTextColor(0);
+$pdf->SetFont('Arial', 'B', 9); $pdf->Cell(40, 7, utf8_decode('Fecha Jornada:'), 0);
+$pdf->SetFont('Arial', '', 9); $pdf->Cell(55, 7, $datos_j['fecha_apertura'], 0);
+$pdf->SetFont('Arial', 'B', 9); $pdf->Cell(40, 7, utf8_decode('Usuario Responsable:'), 0);
+$pdf->SetFont('Arial', '', 9); $pdf->Cell(55, 7, utf8_decode($datos_j['nombre_usuario']), 0, 1);
+$pdf->Ln(8);
 
-    <div class="header">
-        <h1>REPORTE DE VENTAS DETALLADO (SCL)</h1>
-    </div>
+// --- BALANCE ---
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->Cell(0, 8, utf8_decode('  RESUMEN CONTABLE'), 0, 1, 'L', true);
+$pdf->Ln(2);
 
-    <div class="periodo">
-        Generado por: <?php echo $_SESSION['user_full_name'] ?? 'Administrador'; ?><br>
-        Periodo: <?php echo $fecha_inicio; ?> al <?php echo $fecha_fin; ?><br>
-        Fecha de Emisión: <?php echo date('Y-m-d H:i:s'); ?>
-    </div>
+$pdf->SetFont('Arial', '', 11);
+$pdf->Cell(115, 10, utf8_decode('Total Ventas del Sistema (A):'), 1);
+$pdf->Cell(45, 10, '$ ' . number_format($ventas_totales, 2), 1, 1, 'R');
 
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Fecha</th>
-                <th>Cajero</th>
-                <th>Tipo Cobro</th>
-                <th>Monto Venta</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php if (!empty($datos_reporte)): ?>
-                <?php foreach ($datos_reporte as $venta): ?>
-                <tr>
-                    <td><?php echo $venta['id_transaccion']; ?></td>
-                    <td><?php echo $venta['fecha_venta']; ?></td>
-                    <td><?php echo $venta['cajero']; ?></td>
-                    <td><?php echo $venta['tipo_cobro']; ?></td>
-                    <td>$<?php echo number_format($venta['monto_venta'], 2); ?></td>
-                </tr>
-                <?php endforeach; ?>
-            <?php else: ?>
-                <tr>
-                    <td colspan="5" style="text-align: center;">No hay transacciones registradas en este periodo.</td>
-                </tr>
-            <?php endif; ?>
-        </tbody>
-    </table>
+$pdf->Cell(115, 10, utf8_decode('Dinero Confirmado en Banco (B):'), 1);
+$pdf->Cell(45, 10, '$ ' . number_format($dinero_banco, 2), 1, 1, 'R');
 
-    <div class="total-box">
-        <p>TOTAL GENERAL DE VENTAS: $<?php echo number_format($total_ventas_periodo, 2); ?></p>
-    </div>
-    
-    <div class="footer">
-        Este reporte es un documento de control interno generado por el Sistema SCL.
-    </div>
+$pdf->SetFont('Arial', 'B', 11);
+$pdf->SetFillColor(254, 249, 195);
+$pdf->Cell(115, 12, utf8_decode('DIFERENCIA (Efectivo Neto A - B):'), 1, 0, 'L', true);
+$pdf->Cell(45, 12, '$ ' . number_format($diferencia_contable, 2), 1, 1, 'R', true);
+$pdf->Ln(10);
 
-</body>
-</html>
+// --- TABLA DETALLADA (CON REFERENCIA BANCARIA) ---
+$pdf->SetFont('Arial', 'B', 10);
+$pdf->SetFillColor(241, 245, 249);
+$pdf->Cell(0, 8, utf8_decode('  DETALLE DE REFERENCIAS BANCARIAS'), 0, 1, 'L', true);
+$pdf->SetFont('Arial', 'B', 9);
+$pdf->Cell(20, 8, 'ID Pago', 1, 0, 'C');
+$pdf->Cell(45, 8, 'Metodo', 1, 0, 'C');
+$pdf->Cell(55, 8, utf8_decode('Nº Referencia Banco'), 1, 0, 'C'); // Campo solicitado
+$pdf->Cell(35, 8, 'Monto', 1, 0, 'C');
+$pdf->Cell(35, 8, 'Conciliado', 1, 1, 'C');
 
-<?php
-// Obtener el contenido HTML capturado
-$html = ob_get_clean();
+$pdf->SetFont('Arial', '', 9);
+$sql_det = "SELECT dp.*, mp.nombre_metodo FROM detalle_pago dp 
+            JOIN transacciones t ON dp.id_transaccion_fk = t.id_registro 
+            JOIN metodos_pago mp ON dp.id_metodo_fk = mp.id_metodo 
+            WHERE t.id_jornada_fk = $id_jornada_consulta AND dp.id_metodo_fk IN (2,3)";
+$res_det = $conn->query($sql_det);
 
+if($res_det->num_rows > 0) {
+    while ($p = $res_det->fetch_assoc()) {
+        $pdf->Cell(20, 7, $p['id_pago'], 1, 0, 'C');
+        $pdf->Cell(45, 7, utf8_decode($p['nombre_metodo']), 1);
+        // Aquí mostramos la referencia exactamente como en la DB
+        $pdf->SetFont('Arial', 'B', 9);
+        $pdf->Cell(55, 7, utf8_decode($p['referencia'] ?: 'S/R'), 1, 0, 'C');
+        $pdf->SetFont('Arial', '', 9);
+        $pdf->Cell(35, 7, '$ ' . number_format($p['monto_pago'], 2), 1, 0, 'R');
+        
+        $status = ($p['conciliado_banco']) ? 'SI' : 'NO';
+        if($status == 'SI') $pdf->SetTextColor(16, 185, 129); else $pdf->SetTextColor(239, 68, 68);
+        $pdf->Cell(35, 7, $status, 1, 1, 'C');
+        $pdf->SetTextColor(0);
+    }
+} else {
+    $pdf->Cell(190, 7, utf8_decode('Sin movimientos bancarios registrados.'), 1, 1, 'C');
+}
 
-// ===============================================
-// Bloque PHP 3: CONFIGURACIÓN Y GENERACIÓN DEL PDF
-// ===============================================
+// --- FIRMAS ---
+$pdf->Ln(30);
+$pdf->SetFont('Arial', 'B', 9);
+$pdf->Cell(60, 5, '_______________________', 0, 0, 'C');
+$pdf->Cell(70, 5, '', 0, 0);
+$pdf->Cell(60, 5, '_______________________', 0, 1, 'C');
+$pdf->Cell(60, 5, 'FIRMA CAJERO', 0, 0, 'C');
+$pdf->Cell(70, 5, '', 0, 0);
+$pdf->Cell(60, 5, 'FIRMA CONTADOR', 0, 1, 'C');
 
-$options = new Options();
-// Habilitar el procesamiento de imágenes y estilos remotos si es necesario
-$options->set('isHtml5ParserEnabled', true);
-$options->set('isRemoteEnabled', true); 
-
-$dompdf = new Dompdf($options);
-
-// Cargar el HTML que generamos
-$dompdf->loadHtml($html);
-
-// (Opcional) Configurar tamaño y orientación del papel (A4 es estándar)
-$dompdf->setPaper('A4', 'portrait');
-
-// Renderizar el PDF
-$dompdf->render();
-
-// Enviar el PDF al navegador
-$filename = "Reporte_Ventas_{$fecha_inicio}_a_{$fecha_fin}.pdf";
-$dompdf->stream($filename, ["Attachment" => true]); // 'true' fuerza la descarga, 'false' lo muestra en el navegador
+$pdf->Output('I', "Auditoria_Contable_J$id_jornada_consulta.pdf");
 ?>

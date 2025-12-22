@@ -87,6 +87,10 @@ $bloquear = ($estado_actual === 'validada');
         .badge { padding: 4px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; }
         .badge-success { background: #dcfce7; color: #15803d; }
         .badge-danger { background: #fee2e2; color: #b91c1c; }
+
+        /* Estilo para el botón PDF */
+        .btn-pdf { background: #0f172a; color: white; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; transition: 0.2s; border: 1px solid #0f172a; }
+        .btn-pdf:hover { background: #1e293b; }
     </style>
 </head>
 <body>
@@ -107,18 +111,26 @@ $bloquear = ($estado_actual === 'validada');
                 <?php endif; ?>
             </header>
 
-            <div style="background: #ffffff; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 25px; display: flex; align-items: center; gap: 15px;">
-                <label style="font-weight: 600; color: #475569;">Historial de Jornadas:</label>
-                <form method="GET">
-                    <select name="id_jornada" onchange="this.form.submit()" style="padding: 10px; width: 350px; border-radius: 6px; border: 1px solid #cbd5e1; outline: none;">
-                        <option value="0">-- Seleccione una jornada --</option>
-                        <?php while($j = $lista_jornadas->fetch_assoc()): ?>
-                            <option value="<?php echo $j['id_jornada']; ?>" <?php echo ($id_jornada_consulta == $j['id_jornada']) ? 'selected' : ''; ?>>
-                                Jornada #<?php echo $j['id_jornada']; ?> - <?php echo $j['fecha_apertura']; ?> [<?php echo strtoupper($j['estado_jornada']); ?>]
-                            </option>
-                        <?php endwhile; ?>
-                    </select>
-                </form>
+            <div style="background: #ffffff; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 25px; display: flex; align-items: center; justify-content: space-between; gap: 15px;">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <label style="font-weight: 600; color: #475569;">Historial de Jornadas:</label>
+                    <form method="GET">
+                        <select name="id_jornada" onchange="this.form.submit()" style="padding: 10px; width: 350px; border-radius: 6px; border: 1px solid #cbd5e1; outline: none;">
+                            <option value="0">-- Seleccione una jornada --</option>
+                            <?php while($j = $lista_jornadas->fetch_assoc()): ?>
+                                <option value="<?php echo $j['id_jornada']; ?>" <?php echo ($id_jornada_consulta == $j['id_jornada']) ? 'selected' : ''; ?>>
+                                    Jornada #<?php echo $j['id_jornada']; ?> - <?php echo $j['fecha_apertura']; ?> [<?php echo strtoupper($j['estado_jornada']); ?>]
+                                </option>
+                            <?php endwhile; ?>
+                        </select>
+                    </form>
+                </div>
+
+                <?php if ($id_jornada_consulta > 0): ?>
+                    <a href="reporte_ventas_pdf.php?id_jornada=<?php echo $id_jornada_consulta; ?>" target="_blank" class="btn-pdf">
+                        <span>📄</span> Imprimir Reporte para Libro
+                    </a>
+                <?php endif; ?>
             </div>
 
             <?php if ($id_jornada_consulta > 0): 
@@ -177,7 +189,6 @@ $bloquear = ($estado_actual === 'validada');
                     </thead>
                     <tbody>
                         <?php
-                        // CAMBIO CLAVE: Se extrae dp.referencia_banco en lugar de t.referencia_banco
                         $sql_det = "SELECT dp.*, m.nombre_metodo 
                                     FROM detalle_pago dp 
                                     JOIN transacciones t ON dp.id_transaccion_fk = t.id_registro 
