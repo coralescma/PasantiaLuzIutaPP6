@@ -22,52 +22,41 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['btn_guardar_venta'])) 
         $id_usuario = $_SESSION['user_id'];
         $monto_total = floatval($_POST['monto_total_oculto']);
         $id_metodo_pago = intval($_POST['id_metodo_pago']); 
-        $referencia = $conn->real_escape_string($_POST['referencia_banco'] ?? '');
+        $referencia = $conn->real_escape_string($_POST['referencia_banco'] ?? ''); 
 
-        // A. INSERTAR CABECERA EN 'transacciones'
         $sql_trans = "INSERT INTO transacciones (id_usuario_cajero_fk, id_jornada_fk, fecha_transaccion, es_egreso) 
                       VALUES ($id_usuario, $id_jornada, NOW(), 0)";
 
         if ($conn->query($sql_trans)) {
             $id_venta = $conn->insert_id;
-
-            // B. INSERTAR PAGO EN 'detalle_pago'
-            $sql_pago = "INSERT INTO detalle_pago (id_transaccion_fk, id_metodo_fk, monto_pago) 
-                         VALUES ($id_venta, $id_metodo_pago, $monto_total)";
+            $sql_pago = "INSERT INTO detalle_pago (id_transaccion_fk, id_metodo_fk, monto_pago, referencia_banco) 
+                         VALUES ($id_venta, $id_metodo_pago, $monto_total, '$referencia')";
             $conn->query($sql_pago);
 
-            // C. INSERTAR PRODUCTOS EN 'detalle_transaccion'
             $detalles = json_decode($_POST['detalles_json'], true);
             if ($detalles) {
                 foreach ($detalles as $item) {
                     $id_p = intval($item['id_producto']);
                     $cant = intval($item['cantidad']);
                     $precio = floatval($item['precio_venta']);
-
                     $sql_det = "INSERT INTO detalle_transaccion (id_transaccion_fk, id_producto_fk, cantidad, precio_venta) 
                                 VALUES ($id_venta, $id_p, $cant, $precio)";
                     $conn->query($sql_det);
-                    
-                    // D. ACTUALIZAR STOCK EN 'inventario'
                     $conn->query("UPDATE inventario SET stock_actual = stock_actual - $cant WHERE id_producto = $id_p");
                 }
             }
-
             $mensaje = "✅ Venta #$id_venta registrada exitosamente.";
             $clase_mensaje = "alerta-verde";
-        } else {
-            $mensaje = "❌ Error en Transacción: " . $conn->error;
-            $clase_mensaje = "alerta-roja";
         }
     }
 }
 
-// 3. CARGAR PRODUCTOS (Se incluye stock_actual en la consulta)
+// 3. CARGAR PRODUCTOS
 $res_prod = $conn->query("SELECT id_producto, nombre_producto, costo_unitario, stock_actual FROM inventario WHERE stock_actual > 0");
 $productos_json = [];
 while($p = $res_prod->fetch_assoc()) { $productos_json[] = $p; }
 
-// 4. CARGAR MÉTODOS DE PAGO ACTIVOS
+// 4. CARGAR MÉTODOS
 $res_metodos = $conn->query("SELECT id_metodo, nombre_metodo FROM metodos_pago WHERE activo = 1");
 ?>
 
@@ -85,10 +74,8 @@ $res_metodos = $conn->query("SELECT id_metodo, nombre_metodo FROM metodos_pago W
         th { text-align: left; padding: 12px; background: #f1f5f9; color: #475569; }
         td { padding: 10px; border-bottom: 1px solid #f1f5f9; }
         input, select { padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; }
-        .btn-add { background: #475569; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; transition: 0.3s; }
-        .btn-add:hover { background: #1e293b; }
-        .alerta-verde { background: #dcfce7; color: #166534; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bbf7d0; }
-        .alerta-roja { background: #fee2e2; color: #991b1b; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #fecaca; }
+        .btn-add { background: #475569; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; }
+        .btn-remove { background: #ef4444; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -96,109 +83,140 @@ $res_metodos = $conn->query("SELECT id_metodo, nombre_metodo FROM metodos_pago W
 
     <div style="padding: 20px; max-width: 1200px; margin: 0 auto;">
         <h1>🛒 Punto de Venta</h1>
-        
-        <?php if ($mensaje): ?>
-            <div class="<?php echo $clase_mensaje; ?>"><?php echo $mensaje; ?></div>
-        <?php endif; ?>
+        <?php if ($mensaje): ?><div class="<?php echo $clase_mensaje; ?>"><?php echo $mensaje; ?></div><?php endif; ?>
 
-        <?php if (!$id_jornada): ?>
-            <div class="alerta-roja">⛔ No hay jornada abierta. <a href="form_jornada.php">Inicie jornada</a>.</div>
-        <?php else: ?>
-
+        <?php if ($id_jornada): ?>
         <form id="formVenta" method="POST" class="venta-container">
             <div class="panel">
                 <h3>Detalle de Productos</h3>
                 <table>
                     <thead>
                         <tr>
-                            <th>Producto</th>
-                            <th width="100">Cantidad</th>
-                            <th width="130">Precio Unit.</th>
+                            <th>Producto (Stock)</th>
+                            <th width="80">Cant.</th>
+                            <th width="120">Precio</th>
                             <th width="120">Subtotal</th>
+                            <th width="40"></th>
                         </tr>
                     </thead>
                     <tbody id="cuerpoTabla"></tbody>
                 </table>
-                <div style="margin-top: 20px;">
-                    <button type="button" class="btn-add" onclick="agregarFila()">+ Añadir Producto (F8)</button>
-                </div>
+                <button type="button" class="btn-add" style="margin-top:15px;" onclick="agregarFila()">+ Añadir (F8)</button>
             </div>
 
             <div class="panel">
                 <h3>Finalizar Venta</h3>
-                <div style="margin-bottom: 15px;">
-                    <label>Método de Pago:</label>
-                    <select name="id_metodo_pago" required>
-                        <option value="">-- Seleccione --</option>
-                        <?php while($m = $res_metodos->fetch_assoc()): ?>
-                            <option value="<?php echo $m['id_metodo']; ?>"><?php echo $m['nombre_metodo']; ?></option>
-                        <?php endwhile; ?>
-                    </select>
-                </div>
+                <label>Método de Pago:</label>
+                <select name="id_metodo_pago" required style="margin-bottom:15px;">
+                    <option value="">-- Seleccione --</option>
+                    <?php while($m = $res_metodos->fetch_assoc()): ?>
+                        <option value="<?php echo $m['id_metodo']; ?>"><?php echo $m['nombre_metodo']; ?></option>
+                    <?php endwhile; ?>
+                </select>
 
-                <div style="margin-bottom: 15px;">
-                    <label>Referencia / Lote:</label>
-                    <input type="text" name="referencia_banco" placeholder="Opcional">
-                </div>
+                <label>Referencia / Lote:</label>
+                <input type="text" name="referencia_banco" placeholder="Opcional" style="margin-bottom:15px;">
 
                 <div class="total-box">$ <span id="totalTxt">0.00</span></div>
-                
-                <input type="hidden" name="monto_total_oculto" id="monto_total_oculto" value="0">
+                <input type="hidden" name="monto_total_oculto" id="monto_total_oculto">
                 <input type="hidden" name="detalles_json" id="detalles_json">
-                
-                <button type="submit" name="btn_guardar_venta" class="btn-login" style="width:100%; background:#059669; color:white; padding:15px; font-size:1.1em; border-radius:8px; border:none; cursor:pointer;">
-                    CONFIRMAR VENTA
-                </button>
+                <button type="submit" name="btn_guardar_venta" class="btn-login" style="width:100%; background:#059669; color:white; padding:15px; border:none; border-radius:8px; cursor:pointer;">CONFIRMAR VENTA</button>
             </div>
         </form>
         <?php endif; ?>
     </div>
 
     <script>
-        const productosDisponibles = <?php echo json_encode($productos_json); ?>;
-        
+        const productosMaster = <?php echo json_encode($productos_json); ?>;
+
+        function obtenerIdsSeleccionados() {
+            return Array.from(document.querySelectorAll('.p-select'))
+                        .map(sel => sel.value)
+                        .filter(id => id !== "");
+        }
+
+        function actualizarTodosLosSelects() {
+            const seleccionados = obtenerIdsSeleccionados();
+            
+            document.querySelectorAll('.p-select').forEach(select => {
+                const valorActual = select.value;
+                
+                // Limpiar y reconstruir opciones
+                select.innerHTML = '<option value="">-- Seleccionar --</option>';
+                
+                productosMaster.forEach(p => {
+                    // Mostrar si no está seleccionado en otro select, O si es el valor actual de este select
+                    if (!seleccionados.includes(p.id_producto.toString()) || p.id_producto.toString() === valorActual) {
+                        const opt = document.createElement('option');
+                        opt.value = p.id_producto;
+                        opt.text = `${p.nombre_producto} (Stock: ${p.stock_actual})`;
+                        opt.dataset.precio = p.costo_unitario;
+                        opt.dataset.stock = p.stock_actual;
+                        if(p.id_producto.toString() === valorActual) opt.selected = true;
+                        select.appendChild(opt);
+                    }
+                });
+            });
+        }
+
         function agregarFila() {
             const tbody = document.getElementById('cuerpoTabla');
             const tr = document.createElement('tr');
-            let options = '<option value="">-- Seleccionar --</option>';
             
-            // Ajuste aquí para mostrar el stock restante en el select
-            productosDisponibles.forEach(p => {
-                options += `<option value="${p.id_producto}" data-precio="${p.costo_unitario}">
-                    ${p.nombre_producto} (Stock: ${p.stock_actual})
-                </option>`;
-            });
-
             tr.innerHTML = `
-                <td><select class="p-select" required onchange="actualizarPrecio(this)">${options}</select></td>
-                <td><input type="number" class="c-input" value="1" min="1" onchange="recalcular()"></td>
+                <td><select class="p-select" required onchange="manejarCambioProducto(this)"></select></td>
+                <td><input type="number" class="c-input" value="1" min="1" onchange="validarStock(this)"></td>
                 <td><input type="number" class="pre-input" step="0.01" onchange="recalcular()"></td>
                 <td style="font-weight:bold" class="subtotal-cell">$ 0.00</td>
+                <td><button type="button" class="btn-remove" onclick="eliminarFila(this)">×</button></td>
             `;
             tbody.appendChild(tr);
+            actualizarTodosLosSelects();
         }
 
-        function actualizarPrecio(select) {
-            const precio = select.options[select.selectedIndex].getAttribute('data-precio');
-            select.closest('tr').querySelector('.pre-input').value = precio;
+        function manejarCambioProducto(select) {
+            const opt = select.options[select.selectedIndex];
+            const fila = select.closest('tr');
+            if(opt.value) {
+                fila.querySelector('.pre-input').value = opt.dataset.precio;
+                validarStock(fila.querySelector('.c-input'));
+            }
+            actualizarTodosLosSelects();
+            recalcular();
+        }
+
+        function eliminarFila(btn) {
+            btn.closest('tr').remove();
+            actualizarTodosLosSelects();
+            recalcular();
+        }
+
+        function validarStock(input) {
+            const fila = input.closest('tr');
+            const sel = fila.querySelector('.p-select');
+            const stock = parseFloat(sel.options[sel.selectedIndex]?.dataset.stock || 0);
+            if (parseFloat(input.value) > stock) {
+                alert("Stock insuficiente. Máximo: " + stock);
+                input.value = stock;
+            }
             recalcular();
         }
 
         function recalcular() {
-            let totalGeneral = 0;
-            const dataVenta = [];
+            let total = 0;
+            const data = [];
             document.querySelectorAll('#cuerpoTabla tr').forEach(f => {
                 const id = f.querySelector('.p-select').value;
                 const cant = parseFloat(f.querySelector('.c-input').value) || 0;
-                const precio = parseFloat(f.querySelector('.pre-input').value) || 0;
-                const subtotal = cant * precio;
-                f.querySelector('.subtotal-cell').innerText = '$ ' + subtotal.toFixed(2);
-                totalGeneral += subtotal;
-                if(id) dataVenta.push({ id_producto: id, cantidad: cant, precio_venta: precio });
+                const pre = parseFloat(f.querySelector('.pre-input').value) || 0;
+                const sub = cant * pre;
+                f.querySelector('.subtotal-cell').innerText = '$ ' + sub.toFixed(2);
+                total += sub;
+                if(id) data.push({ id_producto: id, cantidad: cant, precio_venta: pre });
             });
-            document.getElementById('totalTxt').innerText = totalGeneral.toFixed(2);
-            document.getElementById('monto_total_oculto').value = totalGeneral;
-            document.getElementById('detalles_json').value = JSON.stringify(dataVenta);
+            document.getElementById('totalTxt').innerText = total.toFixed(2);
+            document.getElementById('monto_total_oculto').value = total;
+            document.getElementById('detalles_json').value = JSON.stringify(data);
         }
 
         window.addEventListener('keydown', (e) => { if(e.key === 'F8') { e.preventDefault(); agregarFila(); } });
