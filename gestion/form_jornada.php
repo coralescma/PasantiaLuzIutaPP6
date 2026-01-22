@@ -4,7 +4,8 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 include '../includes/auth.php'; 
-require_login(); 
+require_login(['Administrador', 'Gerente', 'Supervisor']); 
+
 include '../includes/db_connect.php'; 
 
 $mensaje = "";
@@ -35,14 +36,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['btn_abrir_jornada'])) 
     }
 }
 
-// 3. CONSULTAR HISTORIAL (Con validación de error para evitar el Fatal Error)
-$sql_historial = "SELECT j.*, u.user_full_name 
+// 3. CONSULTAR HISTORIAL (Consulta ajustada para evitar duplicidad)
+$sql_historial = "SELECT j.id_jornada, j.fecha_apertura, j.monto_apertura, j.estado_jornada, u.user_full_name 
                   FROM control_jornadas j 
                   LEFT JOIN usuarios u ON j.id_usuario_apertura_fk = u.id_usuario 
                   ORDER BY j.id_jornada DESC LIMIT 10";
 $historial = $conn->query($sql_historial);
 
-// Si la consulta falla, creamos un array vacío para que el foreach no de error
 if (!$historial) {
     $error_historial = "Error al cargar historial: " . $conn->error;
 }
@@ -68,7 +68,7 @@ if (!$historial) {
         <h1>☀️ Control de Jornada</h1>
 
         <?php if ($mensaje): ?>
-            <div class="alerta-roja"><?php echo $mensaje; ?></div>
+            <div class="<?php echo $clase_mensaje; ?>"><?php echo $mensaje; ?></div>
         <?php endif; ?>
 
         <?php if (!$id_jornada_activa): ?>
@@ -99,14 +99,23 @@ if (!$historial) {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php while($row = $historial->fetch_assoc()): ?>
-                    <tr>
-                        <td><?php echo $row['id_jornada']; ?></td>
-                        <td><?php echo $row['fecha_apertura']; ?></td>
-                        <td>$<?php echo number_format($row['monto_apertura'], 2); ?></td>
-                        <td><?php echo $row['estado_jornada']; ?></td>
-                    </tr>
-                    <?php endwhile; ?>
+    <?php 
+    // Se eliminó data_seek(0) para evitar la repetición de datos en servidores remotos
+    if ($historial && $historial->num_rows > 0):
+        while($row = $historial->fetch_assoc()): 
+    ?>
+    <tr>
+        <td><?php echo htmlspecialchars($row['id_jornada']); ?></td>
+        <td><?php echo htmlspecialchars($row['fecha_apertura']); ?></td>
+        <td>Bs <?php echo number_format($row['monto_apertura'], 2); ?></td>
+        <td><?php echo htmlspecialchars($row['estado_jornada']); ?></td>
+    </tr>
+    <?php 
+        endwhile; 
+    else:
+    ?>
+    <tr><td colspan="4">No hay registros previos.</td></tr>
+    <?php endif; ?>
                 </tbody>
             </table>
         <?php endif; ?>

@@ -17,8 +17,15 @@ $id_jornada = obtenerJornadaActiva($conn);
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['btn_finalizar_cierre'])) {
     $monto_fisico = floatval($_POST['conteo_manual_efectivo']);
     $monto_esperado_efe = floatval($_POST['monto_esperado_oculto']);
-    $observaciones = $conn->real_escape_string($_POST['observaciones']);
     $diferencia = $monto_fisico - $monto_esperado_efe;
+    $observaciones = trim($_POST['observaciones']);
+
+    // NUEVO: Validar si la diferencia excede el umbral y faltan observaciones
+    if (abs($diferencia) > $umbral_permitido && empty($observaciones)) {
+        $mensaje_estado = "⚠️ La diferencia (Bs. " . abs($diferencia) . ") excede el umbral de Bs. $umbral_permitido. Debe explicar el motivo en observaciones.";
+        $clase_mensaje = "alerta-roja";
+        // Aquí NO ejecutamos el INSERT para obligar al usuario a corregir o explicar
+    } else {
 
     $conn->begin_transaction();
     try {

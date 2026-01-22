@@ -11,35 +11,53 @@ $mensaje = "";
 
 // 1. PROCESAR ACTUALIZACIÓN
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['actualizar_params'])) {
-    $id = intval($_POST['id_parametro']);
+    // Validamos que el ID exista, si no, usamos 1 por defecto según tu volcado SQL
+    $id = isset($_POST['id_parametro']) ? intval($_POST['id_parametro']) : 1;
+    
     $umbral_efectivo = $_POST['umbral_efectivo'];
     $umbral_banco = $_POST['umbral_banco'];
     $conteo_inicial = $_POST['conteo_inicial'];
+    $margen_ganancia = $_POST['margen_ganancia'];
 
+    // SQL Corregido con los nombres exactos de tu tabla pmv (4).sql
     $sql = "UPDATE parametros_negocio SET 
             umbral_tolerancia_efectivo = ?, 
             umbral_conciliacion_bancaria = ?, 
-            efectivo_requiere_conteo_inicial = ? 
+            efectivo_requiere_conteo_inicial = ?,
+            margen_ganancia_estandar = ? 
             WHERE id_parametro = ?";
             
     $stmt = $conn->prepare($sql);
+    
     if ($stmt) {
-        $stmt->bind_param("ddii", $umbral_efectivo, $umbral_banco, $conteo_inicial, $id);
+        // "ddidi" -> d (double/decimal), d (double), i (integer), d (double), i (integer)
+        $stmt->bind_param("ddidi", 
+            $umbral_efectivo, 
+            $umbral_banco, 
+            $conteo_inicial, 
+            $margen_ganancia, 
+            $id
+        );
+        
         if ($stmt->execute()) {
-            $mensaje = "<div class='success'>✅ Parámetros actualizados con éxito.</div>";
+            $mensaje = "<div class='success'>✅ Parámetros actualizados correctamente.</div>";
         } else {
             $mensaje = "<div class='error'>❌ Error al ejecutar: " . $stmt->error . "</div>";
         }
+        $stmt->close();
+    } else {
+        // Esto captura el error que te salía (si el prepare devuelve false)
+        $mensaje = "<div class='error'>❌ Error en la consulta SQL: " . $conn->error . "</div>";
     }
 }
 
-// 2. OBTENER DATOS (Se ejecuta siempre, para mostrar los datos actuales o los recién actualizados)
+// 2. OBTENER DATOS ACTUALES
 $res = $conn->query("SELECT * FROM parametros_negocio LIMIT 1");
 $p = ($res) ? $res->fetch_assoc() : null;
 
-// Si la tabla está vacía, intentamos crear el registro inicial para que siempre haya algo que editar
+// Si por alguna razón la tabla está vacía, creamos el registro inicial (ID 1)
 if (!$p) {
-    $conn->query("INSERT INTO parametros_negocio (id_parametro, umbral_tolerancia_efectivo, umbral_conciliacion_bancaria, efectivo_requiere_conteo_inicial) VALUES (1, 5.00, 2.00, 1)");
+    $conn->query("INSERT INTO parametros_negocio (id_parametro, umbral_tolerancia_efectivo, umbral_conciliacion_bancaria, efectivo_requiere_conteo_inicial, margen_ganancia_estandar) VALUES (1, 5.00, 2.00, 1, 30.00)");
     $res = $conn->query("SELECT * FROM parametros_negocio LIMIT 1");
     $p = $res->fetch_assoc();
 }
@@ -74,20 +92,27 @@ if (!$p) {
                 <h3>Editar Parámetros</h3>
                 <form method="POST">
                     <input type="hidden" name="actualizar_params" value="1">
-                    <input type="hidden" name="id_parametro" value="<?php echo $p['id_parametro'] ?? 1; ?>">
+                    <input type="hidden" name="id_parametro" value="<?php echo $p['id_parametro']; ?>">
 
-                    <label>Umbral Tolerancia Efectivo ($)</label>
+                    <label>Umbral Tolerancia Efectivo (Bs)</label>
                     <input type="number" step="0.01" name="umbral_efectivo" class="input-box" 
-                           value="<?php echo htmlspecialchars($p['umbral_tolerancia_efectivo'] ?? '0.00'); ?>">
+                           value="<?php echo htmlspecialchars($p['umbral_tolerancia_efectivo']); ?>">
 
                     <label>Umbral Conciliación Banco (%)</label>
                     <input type="number" step="0.01" name="umbral_banco" class="input-box" 
-                           value="<?php echo htmlspecialchars($p['umbral_conciliacion_bancaria'] ?? '0.00'); ?>">
+                           value="<?php echo htmlspecialchars($p['umbral_conciliacion_bancaria']); ?>">
+
+                    <label>Margen de Ganancia Estándar (%)</label>
+
+
+                    <input type="number" step="0.01" name="margen_ganancia" class="input-box" 
+                        value="<?php echo htmlspecialchars($p['margen_ganancia_estandar']); ?>">
+                        
 
                     <label>Protocolo de Apertura</label>
                     <select name="conteo_inicial" class="input-box">
-                        <option value="1" <?php echo (isset($p['efectivo_requiere_conteo_inicial']) && $p['efectivo_requiere_conteo_inicial'] == 1) ? 'selected' : ''; ?>>SÍ - Conteo Obligatorio</option>
-                        <option value="0" <?php echo (isset($p['efectivo_requiere_conteo_inicial']) && $p['efectivo_requiere_conteo_inicial'] == 0) ? 'selected' : ''; ?>>NO - Opcional</option>
+                        <option value="1" <?php echo ($p['efectivo_requiere_conteo_inicial'] == 1) ? 'selected' : ''; ?>>SÍ - Conteo Obligatorio</option>
+                        <option value="0" <?php echo ($p['efectivo_requiere_conteo_inicial'] == 0) ? 'selected' : ''; ?>>NO - Opcional</option>
                     </select>
 
                     <button type="submit" class="button" style="width:100%; padding:12px; background: #2563eb; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">💾 GUARDAR CONFIGURACIÓN</button>
@@ -98,9 +123,9 @@ if (!$p) {
                 <h3>Guía de Control de Riesgos</h3>
                 <p>Estos valores afectan directamente los semáforos del Dashboard:</p>
                 <ul>
-                    <li><strong>Tolerancia Efectivo:</strong> Si el faltante en el arqueo supera este monto, el sistema marcará el reporte A.1 con "Código X" (Investigación).</li>
-                    <li><strong>Umbral Banco:</strong> Porcentaje máximo de diferencia permitido entre lo que el cajero marcó como TPV y lo que el banco depositó realmente.</li>
-                    <li><strong>Protocolo de Apertura:</strong> Si está activo, el cajero debe contar el fondo de caja antes de iniciar ventas.</li>
+                    <li><strong>Tolerancia Efectivo:</strong> Diferencia máxima permitida en cierres de caja (A.1).</li>
+                    <li><strong>Umbral Banco:</strong> Desviación máxima aceptada en conciliación bancaria (A.2).</li>
+                    <li><strong>Protocolo de Apertura:</strong> Obliga al cajero a registrar el monto inicial.</li>
                 </ul>
             </div>
         </div>

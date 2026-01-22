@@ -4,7 +4,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 include 'includes/auth.php'; 
-require_login(['Administrador', 'Supervisor', 'Contador']); 
+require_login(['Administrador', 'Gerente', 'Supervisor', 'Contador']); 
 include 'includes/db_connect.php'; 
 
 $pagina_activa = 'reporte_a1'; 
@@ -36,7 +36,6 @@ if ($id_jornada_consulta) {
 
     if ($datos_jornada) {
         // --- 3. CONCILIACIÓN DE VENTAS (Suma desde detalle_pago) ---
-        // Esto soluciona que las transacciones con tipo_cobro vacío no se perdieran
         $sql_ventas = "SELECT mp.nombre_metodo, SUM(dp.monto_pago) AS total_por_metodo
                        FROM detalle_pago dp
                        JOIN transacciones t ON dp.id_transaccion_fk = t.id_registro
@@ -57,15 +56,25 @@ if ($id_jornada_consulta) {
             }
         }
 
-        // --- 4. LÓGICA DE EGRESOS DE INVENTARIO ---
-        // Se calcula el costo basado en el precio de costo unitario del inventario
-        $sql_egresos = "SELECT dt.id_detalle, i.nombre_producto, dt.cantidad, dt.motivo, 
-                               dt.usuario_autorizador, (dt.cantidad * i.costo_unitario) AS costo_asociado
-                        FROM detalle_transaccion dt
-                        JOIN transacciones t ON dt.id_transaccion_fk = t.id_registro
-                        JOIN inventario i ON dt.id_producto_fk = i.id_producto
-                        WHERE t.id_jornada_fk = $id_jornada_consulta AND t.es_egreso = 1";
-        $resultado_egresos = $conn->query($sql_egresos);
+        // --- 4 y 5. LÓGICA DE EGRESOS DE INVENTARIO (Salidas Especiales) ---
+        $sql_egresos = "SELECT 
+            t.id_registro AS id_trans,
+            u.user_full_name AS cajero,
+            i.nombre_producto, 
+            de.cantidad, 
+            tm.nombre_movimiento AS motivo, 
+            t.motivo_egreso AS comentario,
+            (de.cantidad * i.costo_unitario) AS costo_asociado 
+        FROM detalle_egresos de
+        JOIN transacciones t ON de.id_transaccion_fk = t.id_registro
+        JOIN inventario i ON de.id_producto_fk = i.id_producto
+        JOIN usuarios u ON t.id_usuario_cajero_fk = u.id_usuario
+        LEFT JOIN tipo_movimiento tm ON de.id_tipo_movimiento_fk = tm.id_tipo_movimiento
+        WHERE t.id_jornada_fk = $id_jornada_consulta 
+        AND t.es_egreso = 1
+        ORDER BY t.id_registro DESC";
+
+        $res_egresos = $conn->query($sql_egresos);
     }
 }
 ?>
@@ -116,16 +125,16 @@ if ($id_jornada_consulta) {
                 <div class="card">
                     <h3>💰 Cuadre de Caja (Efectivo)</h3>
                     <table style="width: 100%;">
-                        <tr><td>Monto Apertura:</td><td align="right">$<?php echo number_format($datos_jornada['monto_apertura'], 2); ?></td></tr>
-                        <tr><td>Ventas Efectivo:</td><td align="right">$<?php echo number_format($total_registrado_efectivo, 2); ?></td></tr>
+                        <tr><td>Monto Apertura:</td><td align="right">Bs <?php echo number_format($datos_jornada['monto_apertura'], 2); ?></td></tr>
+                        <tr><td>Ventas Efectivo:</td><td align="right">Bs <?php echo number_format($total_registrado_efectivo, 2); ?></td></tr>
                         <tr style="border-top: 2px solid #000;">
                             <td><strong>Total Esperado:</strong></td>
-                            <td align="right"><strong>$<?php echo number_format($total_esperado_caja, 2); ?></strong></td>
+                            <td align="right"><strong>Bs <?php echo number_format($total_esperado_caja, 2); ?></strong></td>
                         </tr>
-                        <tr><td>Cierre Real (Físico):</td><td align="right">$<?php echo number_format($datos_jornada['monto_cierre_real'] ?? 0, 2); ?></td></tr>
+                        <tr><td>Cierre Real (Físico):</td><td align="right">Bs <?php echo number_format($datos_jornada['monto_cierre_real'] ?? 0, 2); ?></td></tr>
                         <tr>
                             <td><strong>Diferencia:</strong></td>
-                            <td align="right" class="<?php echo $clase_alerta; ?>"><strong>$<?php echo number_format($diferencia, 2); ?></strong></td>
+                            <td align="right" class="<?php echo $clase_alerta; ?>"><strong>Bs <?php echo number_format($diferencia, 2); ?></strong></td>
                         </tr>
                     </table>
                 </div>
@@ -137,12 +146,12 @@ if ($id_jornada_consulta) {
                             if($pago['nombre_metodo'] == 'Efectivo') continue; ?>
                             <div class="metodo-item">
                                 <span><?php echo $pago['nombre_metodo']; ?>:</span>
-                                <strong>$<?php echo number_format($pago['total_por_metodo'], 2); ?></strong>
+                                <strong>Bs <?php echo number_format($pago['total_por_metodo'], 2); ?></strong>
                             </div>
                         <?php endforeach; ?>
                         <div class="metodo-item" style="margin-top:10px; border-top: 1px solid #000;">
                             <span><strong>TOTAL BANCOS:</strong></span>
-                            <strong>$<?php echo number_format($total_otros_metodos, 2); ?></strong>
+                            <strong>Bs <?php echo number_format($total_otros_metodos, 2); ?></strong>
                         </div>
                     <?php else: ?>
                         <p>No hay registros de otros métodos.</p>
@@ -150,39 +159,77 @@ if ($id_jornada_consulta) {
                 </div>
             </div>
 
-            <section class="detalle-egresos card">
+            <section class="detalle-egresos">
+                <?php if ($res_egresos && $res_egresos->num_rows > 0): 
+                    $total_costo_egresos = 0;
+                    $egresos_agrupados = [];
+
+                    while($fila = $res_egresos->fetch_assoc()) {
+                        $egresos_agrupados[$fila['id_trans']]['info'] = [
+                            'cajero' => $fila['cajero'],
+                            'motivo' => $fila['motivo'],
+                            'comentario' => $fila['comentario']
+                        ];
+                        $egresos_agrupados[$fila['id_trans']]['items'][] = [
+                            'producto' => $fila['nombre_producto'],
+                            'cantidad' => $fila['cantidad'],
+                            'costo' => $fila['costo_asociado']
+                        ];
+                        $total_costo_egresos += $fila['costo_asociado'];
+                    }
+                ?>
+
                 <h3>📉 Egresos de Inventario (Salidas Especiales)</h3>
-                <?php if (isset($resultado_egresos) && $resultado_egresos->num_rows > 0): ?>
-                    <table style="width:100%">
-                        <thead>
-                            <tr>
-                                <th>Producto</th>
-                                <th>Cantidad</th>
-                                <th>Motivo</th>
-                                <th>Costo Asociado</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php while($egreso = $resultado_egresos->fetch_assoc()): 
-                                $total_costo_egresos += $egreso['costo_asociado'];
-                            ?>
-                            <tr>
-                                <td><?php echo $egreso['nombre_producto']; ?></td>
-                                <td align="center"><?php echo $egreso['cantidad']; ?></td>
-                                <td><?php echo $egreso['motivo']; ?></td>
-                                <td align="right">$<?php echo number_format($egreso['costo_asociado'], 2); ?></td>
-                            </tr>
-                            <?php endwhile; ?>
-                        </tbody>
-                        <tfoot>
-                            <tr>
-                                <td colspan="3" align="right"><strong>PÉRDIDA POR EGRESOS:</strong></td>
-                                <td align="right"><strong>$<?php echo number_format($total_costo_egresos, 2); ?></strong></td>
-                            </tr>
-                        </tfoot>
-                    </table>
+
+                <div class="contenedor-tarjetas" style="display: flex; flex-direction: column; gap: 15px;">
+                    <?php foreach ($egresos_agrupados as $id_trans => $datos): ?>
+                        <div class="card-egreso" style="border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                            <div class="card-header" style="background: #f8fafc; padding: 10px 15px; border-bottom: 1px solid #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <span style="background: #334155; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; margin-right: 10px;">#<?php echo $id_trans; ?></span>
+                                    <strong>Cajero:</strong> <?php echo htmlspecialchars($datos['info']['cajero']); ?>
+                                </div>
+                                <span class="badge-info" style="background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: bold;">
+                                    <?php echo htmlspecialchars($datos['info']['motivo'] ?? 'Salida'); ?>
+                                </span>
+                            </div>
+
+                            <div class="card-body" style="padding: 10px 15px;">
+                                <table style="width: 100%; border-collapse: collapse; font-size: 0.95em;">
+                                    <thead>
+                                        <tr style="color: #64748b; border-bottom: 1px solid #f1f5f9; text-align: left;">
+                                            <th style="padding: 5px 0;">Producto</th>
+                                            <th style="padding: 5px 0; text-align: center;">Cant.</th>
+                                            <th style="padding: 5px 0; text-align: right;">Costo</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($datos['items'] as $item): ?>
+                                            <tr style="border-bottom: 1px dotted #f1f5f9;">
+                                                <td style="padding: 8px 0;"><?php echo htmlspecialchars($item['producto']); ?></td>
+                                                <td style="padding: 8px 0; text-align: center;"><?php echo $item['cantidad']; ?></td>
+                                                <td style="padding: 8px 0; text-align: right;">Bs <?php echo number_format($item['costo'], 2); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="card-footer" style="padding: 10px 15px; background: #fff; border-top: 1px solid #f1f5f9;">
+                                <p style="margin: 0; font-size: 0.85em; color: #475569;">
+                                    <strong>Comentario:</strong> <i><?php echo htmlspecialchars($datos['info']['comentario'] ?: 'Sin observaciones'); ?></i>
+                                </p>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+
+                <div style="margin-top: 20px; text-align: right; padding: 15px; background: #f1f5f9; border-radius: 8px;">
+                    <span style="font-size: 1.1em;">TOTAL PÉRDIDA EN INVENTARIO: <strong style="color: #be123c;">Bs <?php echo number_format($total_costo_egresos, 2); ?></strong></span>
+                </div>
+
                 <?php else: ?>
-                    <p>No se registraron egresos en esta jornada.</p>
+                    <p style="color: #666; text-align: center; padding: 20px;">No se registraron egresos especiales en esta jornada.</p>
                 <?php endif; ?>
             </section>
 
